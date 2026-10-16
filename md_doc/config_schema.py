@@ -18,6 +18,14 @@ import difflib
 from typing import Any, Iterable
 
 from .config import is_boolish
+from .pdf_features import (
+    BAR_LAYOUTS,
+    CHAPTER_BREAKS,
+    IMAGE_FITS,
+    NUMBER_STYLES,
+    PDF_VARIANTS,
+    PRINT_MARKS,
+)
 
 _FORMATS = {"pdf", "docx", "dotx", "pptx"}
 _LCR = {"left", "center", "right"}
@@ -27,20 +35,54 @@ BOOL_KEYS: frozenset[str] = frozenset(
     {
         "pdf_forms",
         "include_md_in_share",
+        "preserve_blank_lines",
+        "preserve_line_breaks",
         "cover_page",
         "cover_divider",
         "cover_footer",
         "cover_footer_line",
         "cover_bar",
         "cover_text_on_bar",
+        "cover_meta",
+        "cover_date",
+        "toc_page_numbers",
         "cover_stripe",
         "page_header_bar",
         "section_bar",
         "section_bar_text_on_bar",
         "draft",
         "export",
+        # PDF container & production
+        "pdf_tags",
+        "pdf_custom_metadata",
+        "pdf_presentational_hints",
+        "pdf_optimize_images",
+        "pdf_uncompressed",
+        "pdf_srgb",
+        "pdf_full_fonts",
+        "pdf_hinting",
+        "pdf_attach_source",
+        "pdf_bookmarks",
+        "pdf_layout_check",
+        # typography, numbering, navigation, page layout (PDF)
+        "tabular_numbers",
+        "hyphenate",
+        "page_footnotes",
+        "xref_pages",
+        "numbered_headings",
+        "duplex",
+        "header_first_page",
     }
 )
+
+#: Whole-number keys and the range each accepts (inclusive).
+INT_KEYS: dict[str, tuple[int, int]] = {
+    "pdf_jpeg_quality": (0, 95),
+    "pdf_image_dpi": (36, 1200),
+    "pdf_bookmark_depth": (1, 6),
+    "numbered_headings_depth": (1, 4),
+    "columns": (2, 6),
+}
 
 # Keys whose value must be one of a fixed set (checked case-insensitively).
 ENUM_KEYS: dict[str, set[str]] = {
@@ -53,8 +95,16 @@ ENUM_KEYS: dict[str, set[str]] = {
     "page_header_bar_logo_position": _LCR,
     "sync_target": {"azure", "s3", "local"},
     "export_format": _FORMATS,
+    "bullet_style": {"leaf", "dot", "square", "diamond"},
     "slide_size": {"16:9", "4:3"},
     "slide_split": {"h1", "h2", "marker"},
+    "pdf_variant": set(PDF_VARIANTS),
+    "chapter_break": set(CHAPTER_BREAKS),
+    "heading_number_style": set(NUMBER_STYLES),
+    "image_fit": set(IMAGE_FITS),
+    "print_marks": set(PRINT_MARKS),
+    "header_layout": set(BAR_LAYOUTS),
+    "footer_layout": set(BAR_LAYOUTS),
 }
 
 # Every documented key. Unknown keys outside this set trigger a warning.
@@ -78,6 +128,8 @@ KNOWN_KEYS: frozenset[str] = frozenset(
         "dotx_field_type",
         "body_text_align",
         "table_col_widths",
+        "preserve_blank_lines",
+        "preserve_line_breaks",
         "css_vars",
         # slides (pptx)
         "pptx_template",
@@ -91,6 +143,15 @@ KNOWN_KEYS: frozenset[str] = frozenset(
         "cover_divider",
         "cover_meta_label",
         "cover_meta_author",
+        "cover_meta",
+        "cover_date",
+        "cover_subtitle",
+        "toc_title",
+        "toc_depth",
+        "toc_page_numbers",
+        "bullet_style",
+        "bullet_color",
+        "cover_version",
         "cover_footer",
         "cover_footer_text",
         "cover_footer_line",
@@ -141,7 +202,38 @@ KNOWN_KEYS: frozenset[str] = frozenset(
         "export_filename",
         "export_folder",
         "tags",
+        # PDF container & production
+        "pdf_variant",
+        "pdf_version",
+        "pdf_identifier",
+        "pdf_jpeg_quality",
+        "pdf_image_dpi",
+        "pdf_zoom",
+        "pdf_attachments",
+        "pdf_xmp",
+        "pdf_color_profile",
+        "pdf_bookmark_depth",
+        "description",
+        "keywords",
+        # typography, numbering, navigation, page layout (PDF)
+        "lang",
+        "fonts",
+        "font_features",
+        "numbered_headings_depth",
+        "heading_number_style",
+        "binding_margin",
+        "chapter_break",
+        "columns",
+        "column_gap",
+        "column_rule",
+        "image_fit",
+        "image_resolution",
+        "print_marks",
+        "bleed",
+        "header_layout",
+        "footer_layout",
     }
+    | BOOL_KEYS
 )
 
 Issue = tuple[str, str]  # (severity, message)
@@ -212,6 +304,31 @@ def validate_config(config: dict[str, Any]) -> list[Issue]:
         elif key == "tags":
             if not isinstance(value, (list, str)):
                 issues.append(("error", "'tags' must be a list (or a single string)"))
+        elif key in INT_KEYS:
+            low, high = INT_KEYS[key]
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, str))
+                or not (str(value).strip().lstrip("-").isdigit() and low <= int(str(value)) <= high)
+            ):
+                issues.append(("error", f"'{key}' must be a whole number from {low} to {high}"))
+        elif key == "pdf_zoom":
+            try:
+                ok = not isinstance(value, bool) and 0.1 <= float(value) <= 10
+            except (TypeError, ValueError):
+                ok = False
+            if not ok:
+                issues.append(("error", "'pdf_zoom' must be a number from 0.1 to 10"))
+        elif key in {"pdf_attachments", "pdf_xmp"}:
+            if not all(isinstance(item, str) for item in _norm_list(value)):
+                issues.append(("error", f"'{key}' must be a path or a list of paths"))
+        elif key == "fonts":
+            if not isinstance(value, list) or not all(
+                isinstance(item, (str, dict)) for item in value
+            ):
+                issues.append(
+                    ("error", "'fonts' must be a list of paths or {family, path, …} mappings")
+                )
 
     return issues
 

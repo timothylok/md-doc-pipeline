@@ -2,6 +2,8 @@
 
 from unittest.mock import patch, MagicMock
 
+import re
+
 import pytest
 
 from md_doc.builders.pdf import _resolve_css, build as build_pdf
@@ -433,3 +435,56 @@ class TestHeaderBarFollowsThemeMargins:
             "@page { size: A4; margin: 25mm; }\nbody { font-size: 10pt; }\n",
         )
         assert ".report-body th, .report-body td" not in html
+
+
+def test_cover_subtitle_version_and_hidden_meta() -> None:
+    from md_doc.builders.pdf import _build_cover
+
+    html = _build_cover(
+        "Title",
+        "Author",
+        "1 January 2026",
+        {
+            "cover_subtitle": "Sub <b>title</b>",
+            "cover_version": "Version 2.0",
+            "cover_date": False,
+        },
+        None,
+    )
+    assert 'class="cover-subtitle">Sub &lt;b&gt;title&lt;/b&gt;' in html
+    assert 'class="cover-version">Version 2.0' in html
+    assert "<strong>Date</strong>" not in html and "Prepared by" in html
+
+    bare = _build_cover("Title", "Author", "d", {"cover_meta": False}, None)
+    assert "cover-meta" not in bare
+
+
+def test_table_auto_layout_keeps_short_columns_readable() -> None:
+    """Auto-sized columns must not collapse below their longest word.
+
+    ``overflow-wrap: anywhere`` makes a column's minimum width one character,
+    so the auto layout squeezed short columns to ~10pt in favour of long text.
+    """
+    from weasyprint import CSS, HTML
+
+    from md_doc.builders.pdf import _BASE_FIXES_CSS
+
+    long = "Controlled or semi-remote managed environments with direct supervision. " * 4
+    html = (
+        '<div class="report-body"><table><tr><th>Capability level</th><th>Indicative band</th>'
+        "<th>Typical contexts</th><th>Evidence</th></tr>"
+        f"<tr><td>Foundation</td><td>0-50 days</td><td>{long}</td><td>{long}</td></tr></table></div>"
+    )
+    css = re.sub(r"</?style>", "", _BASE_FIXES_CSS)
+    doc = HTML(string=html).render(
+        stylesheets=[CSS(string=css), CSS(string="@page { size: 450pt 800pt; margin: 20pt }")]
+    )
+    cells = [b for b in doc.pages[0]._page_box.descendants() if type(b).__name__ == "TableCellBox"]
+    first_row_y = min(b.position_y for b in cells)
+    widths = [
+        b.border_width()
+        for b in sorted(cells, key=lambda b: b.position_x)
+        if abs(b.position_y - first_row_y) < 0.5
+    ]
+    # "Capability" and "Foundation" are ~50pt wide at the default size.
+    assert widths[0] > 50 and widths[1] > 40, widths

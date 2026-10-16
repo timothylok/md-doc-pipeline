@@ -268,3 +268,73 @@ Outside
     default = next(p for p in doc.paragraphs if p.text == "Default quote")
     shading = default._p.find(".//" + qn("w:shd"))
     assert shading is None or shading.get(qn("w:fill")) != "FEF3C7"
+
+
+class TestComponentsInWord:
+    def test_callouts_are_shaded_with_coloured_rule(self, tmp_repo):
+        doc = _build_docx(tmp_repo, "::: must\nAct now.\n:::\n\n::: may\nOr not.\n:::\n", {})
+        xml = doc.element.xml.upper()
+        assert 'W:FILL="FDECEB"' in xml and 'W:COLOR="C0392B"' in xml
+        assert 'W:FILL="E7F4EC"' in xml and "MUST" in xml
+
+    def test_rings_figure_is_embedded_as_picture(self, tmp_repo):
+        doc = _build_docx(tmp_repo, "::: rings\ncaption: Figure 1.2 Test\n:::\n", {})
+        assert doc.inline_shapes
+        assert any("Figure 1.2 Test" in p.text for p in doc.paragraphs)
+
+    def test_toc_becomes_word_field_with_title(self, tmp_repo):
+        doc = _build_docx(
+            tmp_repo,
+            "[TOC]\n\n## One\n\ntext\n",
+            {"toc_title": "Contents", "toc_depth": 2},
+        )
+        xml = doc.element.xml
+        assert "TOC \\o" in xml and '"1-2"' in xml
+        assert any(p.text == "Contents" for p in doc.paragraphs)
+        assert doc.settings.element.find(qn("w:updateFields")) is not None
+
+    def test_bullet_style_sets_picture_bullet(self, tmp_repo):
+        doc = _build_docx(
+            tmp_repo, "- a\n- b\n", {"bullet_style": "leaf", "bullet_color": "#5ab379"}
+        )
+        numbering = doc.part.numbering_part.element
+        assert numbering.find(qn("w:numPicBullet")) is not None
+        assert numbering.xpath("//w:lvlPicBulletId")
+
+
+def test_cover_subtitle_and_version_in_word(tmp_repo):
+    doc = _build_docx(
+        tmp_repo,
+        "# Heading\n\ntext\n",
+        {
+            "cover_page": True,
+            "cover_subtitle": "A subtitle",
+            "cover_version": "Version 2.0",
+            "cover_date": False,
+        },
+    )
+    text = "\n".join(p.text for p in doc.paragraphs)
+    assert "A subtitle" in text and "Version 2.0" in text
+    assert "Date" not in text
+
+
+class TestCaptionListsInWord:
+    def test_lists_become_fields_and_captions_are_styled(self, tmp_repo):
+        doc = _build_docx(
+            tmp_repo,
+            "::: list-of\nfigures\n:::\n\n::: list-of\ntables\n:::\n\n"
+            "::: tiers\ncaption: 'Figure 1.1: Structure'\n:::\n\nTable 2.1: Things\n\n| A |\n|---|\n| 1 |\n",
+            {},
+        )
+        xml = doc.element.xml
+        assert 'TOC \\h \\z \\t "Figure Caption,1"' in xml
+        assert 'TOC \\h \\z \\t "Table Caption,1"' in xml
+        styles = {p.text: p.style.name for p in doc.paragraphs}
+        assert styles["Figure 1.1: Structure"] == "Figure Caption"
+        assert styles["Table 2.1: Things"] == "Table Caption"
+        assert "@@" not in xml
+
+    @pytest.mark.parametrize("name", ["tiers", "cards", "matrix", "process", "flow"])
+    def test_each_diagram_is_embedded_as_a_picture(self, tmp_repo, name):
+        doc = _build_docx(tmp_repo, f"::: {name}\n:::\n", {})
+        assert len(doc.inline_shapes) == 1

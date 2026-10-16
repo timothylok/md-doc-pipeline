@@ -50,6 +50,7 @@ When acting as the authoring agent:
 - [Slides](#slides)
 - [Themes](#themes)
 - [Word and PDF](#word-and-pdf)
+- [PDF features](#pdf-features)
 - [Configuration reference](#configuration)
 - [Command reference](#commands)
 - [Exporting](#exporting)
@@ -524,6 +525,147 @@ The colours apply only to that box. To change the default for all callouts,
 set `blockquote { background: #fff3cd; border-left: 3pt solid #d99a00; }`
 in your shared `_theme.css` (or the format-specific theme).
 
+### Bullets
+
+```yaml
+bullet_style: leaf        # leaf, dot, square or diamond
+bullet_color: "#5ab379"
+```
+
+Replaces the default disc in unordered lists with a small SVG shape in PDF and
+a picture bullet in Word. Set both from a theme with
+`--mddoc-bullet-style` and `--mddoc-bullet-color`.
+
+### Table of contents
+
+`[TOC]` lists the headings. Optional keys: `toc_title` adds a heading
+(class `.toctitle`), `toc_depth` limits the levels shown, and
+`toc_page_numbers: false` turns off the PDF dot leaders and page numbers.
+In Word the list becomes a real contents field; Word fills it in when the
+document is opened (accept the "update fields" prompt).
+
+### Requirement callouts (must / should / may)
+
+For standards and guidance documents, mark a requirement with a fenced block.
+The block is shaded and ruled in red (`must`), orange (`should`) or green
+(`may`), carries a MUST / SHOULD / MAY label, and works in PDF, DOCX and DOTX:
+
+```markdown
+::: must
+Providers must identify and manage risks to participants.
+:::
+
+::: should
+Providers should consider diverse participant needs when planning.
+:::
+
+::: may
+Providers may use additional guidance where appropriate.
+:::
+```
+
+The text and background pairs meet WCAG AA contrast. A theme can restyle the
+boxes through the `.callout`, `.callout-label` and `.callout-must` /
+`.callout-should` / `.callout-may` classes (PDF).
+
+### Concentric rings figure
+
+`::: rings` draws a concentric-ring diagram (a layered framework or model) as
+crisp SVG in PDF and an embedded image in Word. Describe it in YAML:
+
+```markdown
+::: rings
+title: The framework
+caption: Figure 1 Components of the framework
+rings:
+  - {label: Context, fill: "#e5e7eb", text: "#1f2937"}
+  - {label: Management, fill: "#1f4e79", text: "#ffffff"}
+  - {label: Planning, fill: "#9dbbd8", text: "#1f2937"}
+  - {label: Environment, fill: "#dbe7f3", text: "#1f2937"}
+centre: {label: People, fill: "#1f2937", text: "#ffffff"}
+satellites: [Roles, Equipment, Inclusion]
+:::
+```
+
+`rings` run from the outside in; each has a `label`, a `fill` and a `text`
+colour (choose pairs with at least 4.5:1 contrast). `centre` is the middle
+circle, `satellites` (up to three) are short labels placed around it, and
+`title`, `caption`, `interior` and `font` are optional. With no options the
+component draws a neutral four-ring placeholder.
+
+### Diagram components
+
+Each diagram is a fenced `::: name` block with YAML options, drawn as SVG in
+PDF and embedded as an image in Word. Every option is optional, every colour
+can be overridden, and the default colour pairs meet WCAG AA contrast. Add
+`caption: "Figure 1.1: Title"` to any of them (see
+[Captions and lists](#captions-and-lists)).
+
+**`::: tiers`** — numbered tiers, each indented further than the last:
+
+```markdown
+::: tiers
+tiers:
+  - {title: The Standard, subtitle: The common foundation, description: Overarching requirements.}
+  - {title: Core guide, subtitle: Practice for every activity, description: Practical guidance.}
+:::
+```
+
+Each tier takes `title`, `subtitle`, `description`, and optional `fill`, `badge` and `accent` colours.
+
+**`::: cards`** — up to four cards in a row, with arrows down to a banner:
+
+```markdown
+::: cards
+title: Capability framework
+cards:
+  - {title: 1 - Context, subtitle: What the environment offers, items: [Supported, Self-reliant]}
+  - {title: 2 - Domains, subtitle: Skills required, items: [Nine domains]}
+banner: {title: Profile required, subtitle: Verified by the provider}
+:::
+```
+
+**`::: matrix`** — a heat-map grid (for example a risk matrix). With no options it draws a 5 by 5 likelihood and consequence matrix. Otherwise give `columns`, `rows`, a `grid` of rating names, `levels` (rating to `fill` and `text`), and optionally `x_label`, `y_label` and `legend: false`.
+
+**`::: process`** — a vertical process of `steps` with a `left` and `right` side panel, an optional `right_box` inside the right panel, and a dashed boundary with a `footer` label.
+
+**`::: flow`** — a flowchart with nodes placed on a grid and arrows routed at right angles. Use it where Mermaid's automatic layout is not enough, such as decisions, loops and parallel branches:
+
+```markdown
+::: flow
+nodes:
+  - {id: a, label: Start, shape: pill, at: [0, 0]}
+  - {id: b, label: Acceptable?, shape: diamond, at: [0, 1]}
+  - {id: c, label: Go ahead, at: [0, 2]}
+  - {id: d, label: Reduce the risk, at: [1, 1]}
+edges:
+  - [a, b]
+  - [b, c, "Yes"]
+  - {from: b, to: d, label: "No", exit: right}
+  - {from: d, to: b, via: right}
+:::
+```
+
+Nodes take `id`, `label`, `at: [column, row]` (fractions are allowed), and optionally `shape` (`box`, `pill` or `diamond`), `span` (columns wide), `fill` and `text`. An edge is `[from, to, label]` or a mapping with `exit` and `enter` sides (`top`, `bottom`, `left`, `right`) and `via: left | right` to route round the outside.
+
+### Captions and lists
+
+A diagram's `caption:` and any line written as `Table 8.1: Support levels` on its own are captions. They are numbered by you, linked, and styled as captions. Two blocks list them:
+
+```markdown
+::: list-of
+figures
+:::
+
+::: list-of
+tables
+:::
+```
+
+In PDF each entry has dot leaders and a page number. In Word the captions get
+`Figure Caption` and `Table Caption` styles and each list becomes a contents
+field that Word fills in when the document is opened.
+
 ### Definition lists and footnotes
 
 ```markdown
@@ -570,6 +712,12 @@ A statement with a supporting note.[^core-example]
 `table_col_widths: [30, 70]` for every table. The counts must match the column count or the
 widths are ignored. PDF, DOCX and DOTX all honour them; without them columns are sized to
 their content, as in PDF.
+
+**Grouped striping.** Put `<!-- table-striping: group -->` on the line before a table to
+alternate the row background by group. Each nonblank first cell starts a new group, even
+when its text repeats the previous label; blank first cells continue the group above.
+Other tables keep the theme's normal every-other-row striping. This works in PDF, DOCX and
+DOTX. The `table-striping` and `col-widths` comments can appear together in either order.
 
 **Wrapping wide content.** PDF table cells wrap long URLs and unbroken text so they
 do not force the table beyond the text width. Use column widths above to stop one
@@ -714,6 +862,12 @@ This text starts on the next page.
 
 ### Alignment and layout
 
+- Extra blank lines add vertical space: each blank line beyond the first becomes one empty line in PDF
+  and Word (code blocks are untouched). Set `preserve_blank_lines: false` to collapse them like
+  plain Markdown.
+- Single line breaks inside a paragraph are joined with a space, as in plain Markdown. Set
+  `preserve_line_breaks: true` to keep each one as a line break (or end a line with two spaces for a
+  one-off break).
 - `body_text_align: justify` (config) justifies Word body text.
 - Wrap a section in `<div style="text-align: left">…</div>` to override alignment for it; every
   paragraph and heading inside inherits it. PDF uses the CSS directly.
@@ -1663,6 +1817,8 @@ content (texts, logo files) stay in YAML.
   --mddoc-cover-footer-color: "#ffffff";    /* cover_footer_color */
   --mddoc-section-bar-color: #2563eb;       /* section_bar_color */
   --mddoc-section-bar-text-color: #ffffff;  /* section_bar_text_color */
+  --mddoc-bullet-style: leaf;               /* bullet_style */
+  --mddoc-bullet-color: #5ab379;            /* bullet_color */
 }
 ```
 
@@ -1873,8 +2029,281 @@ run does not label samples pass or fail; it is a review aid.
 - **`.section-note` and other class-based styles** in a theme are not translated to Word.
 - **Renderer artifacts.** LibreOffice keeps heading space-before at automatic page breaks (Word
   and the PDF drop it); this shows up only when checking with LibreOffice.
+- **PDF-only features.** Bookmarks, PDF/A/UA/X variants, embedded files, numbered headings,
+  page-bottom footnotes, `<!-- columns -->` and `<!-- grid -->` blocks, duplex pages, chapter
+  breaks, print marks and bleed have no Word equivalent; Word flows the content normally (see
+  [PDF features](#pdf-features)). Word does take the `description` and `keywords` metadata and
+  the `{chapter}`, `{section}` and `{title}` header and footer tokens.
 - **Fonts and emoji.** Unsupported emoji glyphs, and fonts that are not installed on the viewing
   machine, fall back differently per application.
+
+
+<a id="pdf-features"></a>
+
+## PDF features
+
+PDF output is produced by WeasyPrint. This page lists everything the pipeline exposes from it,
+each switched by a config key (all in the [key index](#configuration-key-index)). Nothing here
+changes a document that does not set the key, except bookmarks, which are on by default. These
+features are **PDF only**; Word builds ignore them unless a note says otherwise. A worked
+example is `examples/feature-showcase/print-features.md`.
+
+<a id="pdf-features-outline"></a>
+
+### Bookmarks and the document outline
+
+Every heading becomes an entry in the PDF viewer's outline pane (the cover title too). Choose how
+deep it goes, or switch it off:
+
+```yaml
+pdf_bookmark_depth: 2     # H1 and H2 only (default 3)
+pdf_bookmarks: false      # no outline at all
+```
+
+<a id="pdf-features-metadata"></a>
+
+### Metadata, standards and accessibility
+
+The PDF carries the document's `title`, `author`, `description` (Subject), `keywords` (falling
+back to `tags`), a creation date and the generator. With `pdf_custom_metadata` (on by default)
+`version`, `status`, `product` and `document_type` are written as custom properties too. Word
+output receives the same Subject and Keywords.
+
+```yaml
+description: Annual financial statements for FY2026
+keywords: [finance, annual, audited]
+lang: en-GB                 # document language; also drives hyphenation
+pdf_variant: pdf/a-3b       # archival PDF/A (see the list below)
+pdf_identifier: true        # file identifier (PDF/A turns this on by itself)
+```
+
+| `pdf_variant` | Use it for |
+|---------------|------------|
+| `pdf/a-1b`, `pdf/a-2b`, `pdf/a-3b` | Long-term archiving; `a-3b` also allows attachments. |
+| `pdf/a-2u`, `pdf/a-3u`, `pdf/a-4u`, `pdf/a-4e`, `pdf/a-4f` | Archiving with Unicode text (`u`), engineering (`e`) and embedded-file (`f`) profiles. |
+| `pdf/a-1a`, `pdf/a-2a`, `pdf/a-3a` | Archiving with a tagged structure (accessible). |
+| `pdf/ua-1`, `pdf/ua-2` | Accessibility (screen readers); implies `pdf_tags: true`. |
+| `pdf/x-1a`, `pdf/x-3`, `pdf/x-4`, `pdf/x-5g` | Print production. |
+
+`pdf_tags: true` adds the tag structure that screen readers use without claiming a full
+standard. `pdf_version` pins the PDF version (for example `2.0`). A standard variant normally
+sets the version and identifier itself.
+
+<a id="pdf-features-attachments"></a>
+
+### Embedded files
+
+```yaml
+pdf_attach_source: true            # the rendered Markdown travels inside the PDF
+pdf_attachments:                   # project files, found like logos
+  - data/budget.xlsx
+  - assets/terms.pdf
+pdf_xmp: [metadata/rights.xml]     # extra XMP metadata packets
+```
+
+`pdf_attach_source` embeds the Markdown after variables and includes are resolved, named after
+the document. Attachments must live inside the project; paths with `..` or absolute paths are
+ignored. The PDF/A standard limits attachments: `pdf/a-1*` drops all of them and `pdf/a-2*`
+keeps only PDF files, so use `pdf/a-3b` or later to carry the source or data files.
+
+<a id="pdf-features-size"></a>
+
+### File size and quality
+
+```yaml
+pdf_optimize_images: true   # lossless re-compression
+pdf_jpeg_quality: 80        # 0-95
+pdf_image_dpi: 150          # downsample images above 150 dpi
+```
+
+`pdf_full_fonts` embeds whole fonts instead of subsets, `pdf_hinting` keeps hinting,
+`pdf_srgb` embeds the sRGB profile, `pdf_uncompressed` writes a readable, uncompressed file for
+debugging, and `pdf_zoom` scales everything (physical units included, so it is rarely wanted).
+`pdf_presentational_hints` makes raw-HTML attributes such as `align="center"` or `width="50%"`
+count.
+
+<a id="pdf-features-fonts"></a>
+
+### Fonts and typography
+
+Embed brand fonts without installing them. Paths are found like logos; formats `ttf`, `otf`,
+`woff` and `woff2` work.
+
+```yaml
+fonts:
+  - family: Inter
+    regular: assets/fonts/Inter-Regular.ttf
+    bold: assets/fonts/Inter-Bold.ttf
+    italic: assets/fonts/Inter-Italic.ttf
+  - family: Plex Mono
+    path: assets/fonts/PlexMono-Medium.otf
+    weight: 500
+```
+
+Then refer to the family in the theme (`font-family: "Inter", sans-serif`). Word cannot embed
+fonts, so the font must be installed for Word to use it; the PDF always has it.
+
+```yaml
+lang: de                              # hyphenation dictionary and PDF language
+hyphenate: true                       # automatic hyphenation of body text
+tabular_numbers: true                 # equal-width digits in tables
+font_features: '"liga", "onum"'       # OpenType features (CSS font-feature-settings)
+```
+
+<a id="pdf-features-headers"></a>
+
+### Running titles and running headers
+
+`header_text` and every `footer_*` slot accept tokens that WeasyPrint fills per page:
+
+| Token | Value |
+|-------|-------|
+| `{page}`, `{pages}` | Current page and page count. |
+| `{chapter}` | Title of the H1 the page is in (first one starting on the page). |
+| `{section}` | Title of the last H2 on the page, empty before the first H2 of a chapter. |
+| `{title}` | The document title. |
+
+Word headers and footers understand the same tokens: `{page}` and `{pages}` are live page-number
+fields, `{chapter}` and `{section}` are `STYLEREF "Heading 1"` / `"Heading 2"` fields that Word
+fills per page (LibreOffice shows them blank), and `{title}` is plain text.
+
+```yaml
+header_text: "{title} — {chapter}"
+footer_right: "{section} · {page}/{pages}"
+```
+
+By default the header and footer are three separate margin boxes. `header_layout: running`
+(and `footer_layout: running`) instead lay the logo, text and tokens out as one flex row spanning
+the page, with the logo and the live titles in the same line:
+
+```yaml
+header_layout: running
+header_logo: assets/logo.png
+header_logo_position: right
+header_text: "{chapter}"
+```
+
+The running layout is ignored while `page_header_bar` is on (the bar has its own layout).
+`header_first_page: false` hides the header on the first page of a document without a cover.
+
+<a id="pdf-features-numbering"></a>
+
+### Numbered headings
+
+```yaml
+numbered_headings: true
+numbered_headings_depth: 3          # 1, 1.1, 1.1.1 (maximum 4)
+heading_number_style: upper-roman   # I, I.1, I.1.1
+```
+
+Numbering starts at the first heading level that structures the document: when the only H1 is
+the title at the top, the H2s are numbered 1, 2, 3 …, otherwise the H1s are. The `[TOC]` entries
+show the same numbers.
+
+<a id="pdf-features-footnotes"></a>
+
+### Page-bottom footnotes and cross-references
+
+```yaml
+page_footnotes: true   # footnotes at the foot of the page that cites them
+xref_pages: true       # "see Results (p. 12)"
+```
+
+Footnotes use the normal Markdown syntax (`text[^1]` … `[^1]: note`); without
+`page_footnotes` they are collected at the end of the document as before.
+
+An internal link with **no text** takes the heading's text: `[](#results)` renders as the
+heading "Results". With `xref_pages`, every internal link outside the contents list is followed
+by "(p. N)". Heading ids are the lower-cased heading text with hyphens (`## Key results` →
+`#key-results`).
+
+<a id="pdf-features-layout"></a>
+
+### Columns and grids
+
+Flow a section in columns or lay blocks out as cards. Both are Markdown comments, so Word builds
+ignore them and flow the content normally.
+
+```markdown
+<!-- columns: 2, gap=8mm, rule=0.5pt solid #ccc -->
+Text that flows from the first column into the second …
+
+More text.
+<!-- /columns -->
+
+<!-- grid: 3, gap=6mm -->
+**Plan A** — fast
+
+**Plan B** — cheap
+
+**Plan C** — balanced
+<!-- /grid -->
+```
+
+Each paragraph, list or table directly inside a `grid` block is one cell. `columns: 3` in
+config flows the whole body instead (with `column_gap` and `column_rule`); H1 headings span all
+columns. `md-doc lint` reports a block that is never closed.
+
+<a id="pdf-features-facing"></a>
+
+### Facing pages and chapter starts
+
+```yaml
+duplex: true            # left/right pages with mirrored margins and slots
+binding_margin: 8mm     # extra inner margin for binding
+chapter_break: recto    # each H1 starts on a right-hand page (blank page inserted if needed)
+```
+
+Left-hand pages get the outer margin on the left and the inner (binding) margin on the right,
+and the left and right header/footer slots swap, so what you put in the `right` slot stays on
+the outside edge of the sheet; the theme's own footer boxes swap too. `chapter_break` accepts
+`page`, `recto`, `verso`, `left` and `right`. The first heading of the document never forces a
+break, and the blank pages inserted by `recto`/`verso` carry no header or footer.
+
+`duplex` is ignored (with a warning) while `page_header_bar` is on, because the bar's full-bleed
+offsets assume identical margins on every page.
+
+<a id="pdf-features-print"></a>
+
+### Print production
+
+```yaml
+print_marks: crop cross   # crop marks / registration crosses
+bleed: 3mm                # artwork extends past the trim edge
+pdf_variant: pdf/x-4
+pdf_color_profile: assets/cmyk.icc   # registered as device-cmyk
+```
+
+With a profile, a theme can use `device-cmyk(0 0.8 1 0)` colours. Marks and bleed enlarge the
+PDF's media box beyond the paper size. Cover bars, the header bar and other coloured boxes stop
+at the trim edge; if a design must bleed, extend those boxes in the theme with negative margins
+of the same size.
+
+<a id="pdf-features-images"></a>
+
+### Images
+
+`image_fit` (`contain`, `cover`, `fill`, `scale-down`, `none`) controls how an image with a fixed
+width and height fills its box (`![](a.png){ style="width: 60mm; height: 40mm" }`). `image_resolution`
+(for example `150dpi` or `2x`) sets the size a bitmap prints at.
+
+<a id="pdf-features-checks"></a>
+
+### Layout checks
+
+`pdf_layout_check: true` inspects the laid-out pages before the PDF is written and prints a
+warning for each problem: a heading stranded at the foot of a page, content running past the
+right margin (a wide table or image) and pages with no body content. Run `md-doc --debug build`
+to see the page count of every document.
+
+<a id="pdf-features-unsupported"></a>
+
+### What WeasyPrint cannot do
+
+`text-wrap: balance` (balanced heading lines) is not supported by the WeasyPrint version this
+pipeline uses, so it has no key. Theme CSS may use anything WeasyPrint does accept, with no key
+needed: `@counter-style`, `@page :nth()` and `@page :blank` selectors, `float: footnote`,
+`position: running()`, `string-set`, `font-variant-*` and `display: grid`.
 
 
 <a id="configuration"></a>
@@ -1945,6 +2374,21 @@ cover_label: Concept
 > **What it does:** Renders small uppercase text above the title on the cover page. Appears in the theme's accent colour (or white when `cover_text_on_bar` is active). Use it to categorise the document — `"Report"`, `"Proposal"`, `"Draft"`, `"Concept"`, `"Strategy"`.
 >
 > **Default:** `"Report"`
+
+<a id="configuration-cover-subtitle"></a>
+
+#### Cover subtitle, version and meta lines
+
+```yaml
+cover_subtitle: Key requirements for preparing and delivering activities.
+cover_version: Version 2.0 Updated • September 2026
+cover_date: false
+cover_meta: false
+```
+
+> **What it does:** `cover_subtitle` adds a line under the title (class `.cover-subtitle`); `cover_version` adds a line below the divider (class `.cover-version`). Both are optional, styled by the theme, and appear in PDF and Word. `cover_date: false` removes the "Date" line and `cover_meta: false` removes the whole "Prepared by / Date" block.
+>
+> **Defaults:** no subtitle, no version, `cover_date: true`, `cover_meta: true`
 
 <a id="configuration-text-alignment"></a>
 
@@ -2724,6 +3168,8 @@ override shallower ones. Lengths are CSS lengths (`mm`, `pt`, `cm`, `in`, `px`).
 | `pdf_theme` | string | cascade | Theme file overriding the normal search for all formats. |
 | `dotx_field_type` | enum | `form` | `form` (fillable Word fields) or `merge` (MERGEFIELDs). |
 | `body_text_align` | enum | theme | Word body alignment: `justify`, `left`, `center`, `right`. |
+| `preserve_blank_lines` | boolean | `true` | Each blank line beyond the first adds one line of vertical space (PDF/Word); `false` collapses them like plain Markdown. Code blocks are untouched. |
+| `preserve_line_breaks` | boolean | `false` | Keep single line breaks inside a paragraph or list item as line breaks (PDF/Word); off, Markdown joins them with a space (end a line with two spaces for one break). |
 | `table_col_widths` | list | auto | Relative column widths for every table, e.g. `[30, 70]`; per table use `<!-- col-widths: 30, 70 -->`. |
 | `css_vars` | mapping | — | PDF only: per-document CSS custom properties; image paths resolved by the asset cascade. |
 | `pptx_template` | string | built-in | `.pptx`/`.potx` base for slide output. |
@@ -2736,6 +3182,10 @@ override shallower ones. Lengths are CSS lengths (`mm`, `pt`, `cm`, `in`, `px`).
 | `cover_divider` | boolean | `true` | Rule under the cover title. |
 | `cover_meta_label` | string | `Prepared by` | Label before the author on the cover. |
 | `cover_meta_author` | string | `author` | Author shown on the cover only. |
+| `cover_meta` | boolean | `true` | Show the "Prepared by / Date" block on the cover. |
+| `cover_date` | boolean | `true` | Show the "Date" line on the cover. |
+| `cover_subtitle` | string | — | Subtitle line under the cover title. |
+| `cover_version` | string | — | Version line on the cover. |
 | `cover_footer` | boolean | `true` | Show the cover footer. |
 | `cover_footer_text` | string | `{author} · Confidential` | Cover footer text; `\n` for line breaks. |
 | `cover_footer_line` | boolean | `true` | Rule above the cover footer. |
@@ -2754,9 +3204,9 @@ override shallower ones. Lengths are CSS lengths (`mm`, `pt`, `cm`, `in`, `px`).
 | `header_logo` | path | — | Logo in the page header (document folder, ancestors, repo root). |
 | `header_logo_position` | enum | `right` | `left`, `center` or `right`. |
 | `header_logo_height` | length | intrinsic, max 8mm | Exact logo height. |
-| `header_text` | string | — | Text in the page header. |
+| `header_text` | string | — | Text in the page header; accepts the same `{page}`, `{pages}`, `{chapter}`, `{section}` and `{title}` tokens as the footer. |
 | `header_text_position` | enum | `left` | `left`, `center` or `right`. |
-| `footer_left` | string | theme | Left footer slot; `{page}` and `{pages}` insert live page numbers; empty string hides it. |
+| `footer_left` | string | theme | Left footer slot; `{page}` and `{pages}` insert live page numbers, `{chapter}`/`{section}` the running H1/H2 title (PDF), `{title}` the document title; empty string hides it. |
 | `footer_center` | string | theme | Centre footer slot. |
 | `footer_right` | string | theme | Right footer slot. |
 | `page_header_bar` | boolean | `false` | Solid coloured bar on every content page. |
@@ -2772,7 +3222,58 @@ override shallower ones. Lengths are CSS lengths (`mm`, `pt`, `cm`, `in`, `px`).
 | `section_bar_color` | string | `#2563eb` | Bar colour. |
 | `section_bar_text_on_bar` | boolean | `true` | Text on the bar (`true`) or a rule above the heading (`false`). |
 | `section_bar_text_color` | string | `#ffffff` | Text colour when on the bar. |
+| `bullet_style` | `leaf` / `dot` / `square` / `diamond` | — | Custom bullet for unordered lists (PDF and Word). |
+| `bullet_color` | string | `#2563eb` | Colour of the custom bullet (six-digit hex). |
+| `toc_title` | string | — | Heading shown above a `[TOC]` list. |
+| `toc_depth` | integer | all levels | Deepest heading level listed in the contents (1-6). |
+| `toc_page_numbers` | boolean | `true` | PDF contents lines end in dot leaders and page numbers. |
 | `section_bar_headings` | string | `h1,h2` | Which headings get bars. |
+| `description` | string | — | One-line summary written to the PDF Subject (and Word Subject) property. |
+| `keywords` | list | `tags` | PDF Keywords (and Word Keywords); a list or comma-separated string, falling back to `tags`. |
+| `lang` | string | `en` | Document language (BCP 47, e.g. `en-GB`, `de`) for hyphenation, screen readers and PDF metadata. |
+| `pdf_variant` | enum | — | PDF standard: `pdf/a-1b`…`pdf/a-4f` (archival), `pdf/ua-1`/`pdf/ua-2` (accessible), `pdf/x-1a`…`pdf/x-5g` (print). |
+| `pdf_version` | string | variant's | PDF version such as `1.7` or `2.0`. |
+| `pdf_identifier` | boolean or string | — | `true` writes an automatic file identifier; a string sets it. PDF/A variants always get one. |
+| `pdf_tags` | boolean | `false` | Tagged PDF for screen readers (implied by `pdf/ua-*`). |
+| `pdf_custom_metadata` | boolean | `true` | Also write `version`, `status`, `product` and `document_type` into the PDF properties. |
+| `pdf_bookmarks` | boolean | `true` | Heading outline in the PDF viewer's sidebar. |
+| `pdf_bookmark_depth` | integer | `3` | Deepest heading level in the outline (1-6). |
+| `pdf_attach_source` | boolean | `false` | Embed the rendered Markdown inside the PDF. |
+| `pdf_attachments` | list | — | Project files embedded in the PDF (resolved like logos). |
+| `pdf_xmp` | list | — | Files of extra XMP metadata (XML) merged into the PDF. |
+| `pdf_optimize_images` | boolean | `false` | Re-compress embedded images without quality loss. |
+| `pdf_jpeg_quality` | integer | — | JPEG quality, 0 (smallest) to 95 (best). |
+| `pdf_image_dpi` | integer | — | Downsample embedded images to at most this resolution. |
+| `pdf_uncompressed` | boolean | `false` | Leave the PDF uncompressed (debugging). |
+| `pdf_srgb` | boolean | `false` | Embed the sRGB profile and use it for untagged RGB colours. |
+| `pdf_full_fonts` | boolean | `false` | Embed whole font files instead of subsets. |
+| `pdf_hinting` | boolean | `false` | Keep hinting data in embedded fonts. |
+| `pdf_presentational_hints` | boolean | `false` | Honour legacy HTML attributes (`align`, `width`, `border`) in raw HTML. |
+| `pdf_zoom` | number | `1` | Scale the whole PDF (physical units are scaled too; rarely wanted). |
+| `pdf_color_profile` | path | — | ICC file registered as `device-cmyk` for print colours. |
+| `pdf_layout_check` | boolean | `false` | Warn about stranded headings, content past the margin and blank pages. |
+| `fonts` | list | — | Fonts to embed: `{family, path}` entries or `{family, regular, bold, italic, bold_italic}`. |
+| `font_features` | string | — | OpenType features, e.g. `"liga", "onum"` (CSS `font-feature-settings`). |
+| `tabular_numbers` | boolean | `false` | Equal-width digits in tables so figures line up. |
+| `hyphenate` | boolean | `false` | Automatic hyphenation of body text (uses `lang`). |
+| `numbered_headings` | boolean | `false` | Number headings 1, 1.1, 1.1.1 (and the contents entries). |
+| `numbered_headings_depth` | integer | `3` | Deepest numbered level (1-4). |
+| `heading_number_style` | enum | `decimal` | Top-level style: `decimal`, `decimal-leading-zero`, `upper-roman`, `lower-roman`, `upper-alpha`, `lower-alpha`. |
+| `page_footnotes` | boolean | `false` | Markdown footnotes appear at the foot of the page that cites them. |
+| `xref_pages` | boolean | `false` | Internal links read "(p. N)" after the link text. |
+| `header_layout` | enum | `box` | `box` (margin boxes) or `running` (one flex row with logo, text and live titles). |
+| `footer_layout` | enum | `box` | Same choice for the footer. |
+| `header_first_page` | boolean | `true` | `false` hides the header on the first page of a document without a cover. |
+| `duplex` | boolean | `false` | Facing pages: mirrored margins and header/footer slots. |
+| `binding_margin` | length | `0mm` | Extra inner margin on facing pages. |
+| `chapter_break` | enum | — | Start each H1 on a new `page`, or on a `recto` (right-hand) / `verso` (left-hand) page. |
+| `columns` | integer | — | Flow the whole body in 2-6 columns. |
+| `column_gap` | length | `8mm` | Gap between columns. |
+| `column_rule` | string | — | Rule between columns, e.g. `0.5pt solid #ccc`. |
+| `image_fit` | enum | — | How images fill their box: `contain`, `cover`, `fill`, `scale-down`, `none`. |
+| `image_resolution` | string | — | Intrinsic image resolution, e.g. `150dpi`, `2x` or `from-image`. |
+| `print_marks` | enum | — | Printer's marks: `crop`, `cross` or `crop cross`. |
+| `bleed` | length | — | Bleed beyond the trim edge, e.g. `3mm`. |
 | `sync_target` | enum | — | `azure`, `s3` or `local`. |
 | `sync_config` | mapping | — | Backend settings; `${NAME}` is replaced from the environment. |
 | `export` | boolean | `false` | Mark a note for `md-doc export` (inheritable from `_meta.yml`). |

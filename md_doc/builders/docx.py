@@ -59,7 +59,7 @@ from ..docx_theme import (
     set_cell_shading,
     set_para_shading,
 )
-from .pdf import _inject_page_breaks, _keep_heading_with_next
+from .pdf import _inject_blank_lines, _inject_page_breaks, _keep_heading_with_next
 from ._assets import (
     _DEFAULT_GEOMETRY,
     _drop_empty_table_headers,
@@ -652,6 +652,26 @@ def _render_cell_html(
 # ---------------------------------------------------------------------------
 
 
+def _render_component_svgs(html: str, images: list[tuple[bytes, int, int]]) -> str:
+    """Rasterise ``mddocsvg:`` component figures, appending them to *images*.
+
+    Each reference becomes a ``mermaid://N`` image, so the existing picture
+    embedding path handles it.
+    """
+    from ..components import decode_svg_ref
+    from ._assets import _svg_to_png
+
+    def _replace(m: re.Match) -> str:
+        svg = decode_svg_ref(m.group(1))
+        png = _svg_to_png(svg) if svg else None
+        if png is None:
+            return m.group(0)
+        images.append(png)
+        return f'src="mermaid://{len(images) - 1}"'
+
+    return re.sub(r'src="(mddocsvg:[A-Za-z0-9_=-]+)"', _replace, html)
+
+
 class _DocxBuilder(HTMLParser):
     """
     Walk an HTML fragment and populate a python-docx Document.
@@ -696,6 +716,8 @@ class _DocxBuilder(HTMLParser):
         self._layout_css = layout_css  # PDF theme CSS used for table auto-layout
         # pdf_forms documents draw ordinary tables as plain black grids.
         self._form_document = form_document
+        self._next_table_group_striping = False
+        self._active_table_group_striping = False
 
         apply_theme_to_doc(self.doc, self._theme)
 
@@ -1453,6 +1475,11 @@ class _DocxBuilder(HTMLParser):
                 section.orientation = WD_ORIENT.LANDSCAPE if width > height else WD_ORIENT.PORTRAIT
                 section.different_first_page_header_footer = False
                 self._paragraph = None
+            if "md-doc-blank" in classes:
+                # Extra blank line in the source: one empty paragraph.
+                self._flush_pending_break()
+                self.doc.add_paragraph()
+                self._paragraph = None
             if "md-doc-page-break" in classes:
                 # Defer: a break on the *next* paragraph keeps that paragraph's
                 # top margin, which an empty break paragraph would swallow.
@@ -1609,6 +1636,8 @@ class _DocxBuilder(HTMLParser):
             except ValueError:
                 self._table_gap = 0.0
             self._table_pdf_html = dict(attrs).get("data-pdf")
+            self._active_table_group_striping = self._next_table_group_striping
+            self._next_table_group_striping = False
             self._in_table = True
             self._table_style = _parse_inline_style(dict(attrs).get("style"))
             self._table_rows = []
@@ -1872,6 +1901,8 @@ class _DocxBuilder(HTMLParser):
                     self._next_table_col_widths = widths
             except ValueError:
                 pass
+        elif stripped.lower() == "table-striping: group":
+            self._next_table_group_striping = True
 
     # ------------------------------------------------------------------
     # Table rendering
@@ -2190,6 +2221,23 @@ class _DocxBuilder(HTMLParser):
             if pdf_heights is not None and len(pdf_heights) != n_rows:
                 pdf_heights = None
         header_rows = 1 if all(cell[0] for cell in rows[0]) else 0
+        group_stripes: list[bool] = []
+        group_index = -1
+        previous_group: str | None = None
+        for row_index, cells in enumerate(rows):
+            if row_index < header_rows:
+                group_stripes.append(False)
+                continue
+            key = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", cells[0][1])).strip() if cells else ""
+            if key:
+                # A repeated label starts a new group too; blank cells alone
+                # indicate continuation of the previous group.
+                group_index += 1
+                previous_group = key
+            elif previous_group is None:
+                group_index += 1
+                previous_group = ""
+            group_stripes.append(group_index % 2 == 1)
 
         for r_idx, row_cells in enumerate(rows):
             is_last_row = r_idx == n_rows - 1
@@ -2357,7 +2405,11 @@ class _DocxBuilder(HTMLParser):
                     # <thead> and the body in a <tbody>, and CSS tr:nth-child(even)
                     # counts within the tbody: the first body row is unshaded, the
                     # second shaded (verified against the rendered PDF).
-                    if row_alt_bg and (r_idx - header_rows) % 2 == 1:
+                    if row_alt_bg and (
+                        group_stripes[r_idx]
+                        if self._active_table_group_striping
+                        else (r_idx - header_rows) % 2 == 1
+                    ):
                         set_cell_shading(cell, row_alt_bg)
                     # Bottom border
                     if not form_kind:
@@ -2660,6 +2712,10 @@ def _add_docx_cover_page(
     )
     meta_label = str(config.get("cover_meta_label", "Prepared by"))
     meta_author = str(config.get("cover_meta_author", author))
+    cover_subtitle = str(config.get("cover_subtitle") or "").strip()
+    cover_version = str(config.get("cover_version") or "").strip()
+    show_meta = bool(config.get("cover_meta", True))
+    show_date = bool(config.get("cover_date", True))
 
     # Match the PDF cover: bar + title + divider use $primary (color_h1); the
     # label uses the accent (color_h2); meta value is muted grey with a
@@ -2851,6 +2907,18 @@ def _add_docx_cover_page(
     r, g, b = _hex_to_rgb(title_color)
     trun.font.color.rgb = RGBColor(r, g, b)
 
+    # 5b. Optional subtitle — bold muted line under the title (PDF: .cover-subtitle).
+    if cover_subtitle:
+        sp = _cover_para(0, Mm(8).pt)
+        sp.paragraph_format.line_spacing = Pt(12 * 1.4)
+        srun = sp.add_run(cover_subtitle)
+        srun.bold = True
+        srun.font.size = Pt(12)
+        if font_body:
+            _apply_font_name(srun.font, font_body)
+        sr, sg, sb = _hex_to_rgb("ffffff" if text_on_bar else meta_value_color)
+        srun.font.color.rgb = RGBColor(sr, sg, sb)
+
     # 6. Short divider rule — 40mm, 3pt, $primary (PDF: .cover-divider).
     #    A bottom-bordered empty paragraph, indented from the far side so the
     #    rule is 40mm wide rather than full-width.
@@ -2895,9 +2963,21 @@ def _add_docx_cover_page(
         vr, vg, vb = _hex_to_rgb(meta_value_color)
         val.font.color.rgb = RGBColor(vr, vg, vb)
 
-    if meta_author:
+    # Optional version line (PDF: .cover-version) — italic muted text.
+    if cover_version:
+        vp = _cover_para(0, Mm(4).pt)
+        vp.paragraph_format.line_spacing = Pt(9.5 * 1.4)
+        vrun = vp.add_run(cover_version)
+        vrun.italic = True
+        vrun.font.size = Pt(9.5)
+        if font_body:
+            _apply_font_name(vrun.font, font_body)
+        vr2, vg2, vb2 = _hex_to_rgb("ffffff" if text_on_bar else meta_value_color)
+        vrun.font.color.rgb = RGBColor(vr2, vg2, vb2)
+
+    if show_meta and meta_author:
         _meta_line(meta_label, meta_author)
-    if date_str:
+    if show_meta and show_date and date_str:
         _meta_line("Date", date_str)
 
     # 8. A page-anchored drawing avoids office clipping/repositioning of
@@ -3806,7 +3886,7 @@ def _add_page_header_bar(
 # ---------------------------------------------------------------------------
 
 
-_FOOTER_TOKEN_RE = re.compile(r"(\{pages?\})")
+_FOOTER_TOKEN_RE = re.compile(r"(\{(?:pages?|chapter|section)\})")
 
 _CSS_CONTENT_TOKEN_RE = re.compile(
     r'"([^"]*)"'  # double-quoted string
@@ -3887,7 +3967,7 @@ def _css_footer_defaults(css_text: str | None, date_str: str) -> dict[str, tuple
     return result
 
 
-def _add_simple_field(paragraph: Any, instr: str) -> list[Any]:
+def _add_simple_field(paragraph: Any, instr: str, placeholder: str = "1") -> list[Any]:
     """Append a simple Word field (e.g. ``PAGE``/``NUMPAGES``); return all its runs.
 
     Every run (not just the result) is returned so the caller can style them:
@@ -3909,7 +3989,7 @@ def _add_simple_field(paragraph: Any, instr: str) -> list[Any]:
     sep.set(qn("w:fldCharType"), "separate")
     run3._r.append(sep)
 
-    value_run = paragraph.add_run("1")
+    value_run = paragraph.add_run(placeholder)
 
     run5 = paragraph.add_run()
     end = OxmlElement("w:fldChar")
@@ -3934,6 +4014,11 @@ def _emit_footer_segment(paragraph: Any, text: str, lead_tabs: int = 0) -> list[
             runs.extend(_add_simple_field(paragraph, "PAGE"))
         elif part == "{pages}":
             runs.extend(_add_simple_field(paragraph, "NUMPAGES"))
+        elif part == "{chapter}":
+            # The PDF's running H1 title: Word's STYLEREF field reads it per page.
+            runs.extend(_add_simple_field(paragraph, 'STYLEREF "Heading 1"', ""))
+        elif part == "{section}":
+            runs.extend(_add_simple_field(paragraph, 'STYLEREF "Heading 2"', ""))
         elif part:
             for i, line in enumerate(part.split("\n")):
                 if i > 0:
@@ -4104,9 +4189,9 @@ def _add_plain_header(
     slots: dict[str, list[Any]] = {"left": [], "center": [], "right": []}
 
     def _slot_text(pos: str) -> None:
-        run = para.add_run(str(header_text))
-        run.font.size = Pt(8)
-        run.font.color.rgb = RGBColor(0x5D, 0x6D, 0x7E)
+        for run in _emit_footer_segment(para, str(header_text)):
+            run.font.size = Pt(8)
+            run.font.color.rgb = RGBColor(0x5D, 0x6D, 0x7E)
 
     def _slot_logo(pos: str) -> None:
         run = para.add_run()
@@ -4410,8 +4495,11 @@ def build(
     # Explicit page breaks are shared with the PDF builder.
     from ..pagination import inject_section_breaks
 
-    body = inject_section_breaks(_inject_page_breaks(body))
+    body = inject_section_breaks(_inject_page_breaks(_inject_blank_lines(body)))
     body = collapse_select_markup(body)
+    from ..components import expand_components
+
+    body = expand_components(body, "docx")
     if output_format == "dotx":
         # Same source, fillable Word template: ?[...] → Word form fields.
         body = _convert_form_fields_for_dotx(body)
@@ -4419,18 +4507,30 @@ def build(
         body = _strip_form_fields_for_docx(body)
 
     from ..math import markdown_html, render_math
+    from ..toc import toc_extension_config
 
     theme = _resolve_docx_theme(doc_path, repo_root, config)
     _merge_pdf_form_css(theme, config, repo_root, doc_path)
     _FORM_DIMS.set(_compute_form_dims(theme))
     html, math_equations = render_math(
         _word_html_forms(
-            _flex_rows_to_tables(markdown_html(body, _MD_EXTENSIONS), theme.get("flex_rows")),
+            _flex_rows_to_tables(
+                markdown_html(
+                    body,
+                    _MD_EXTENSIONS,
+                    coerce_bool(config.get("preserve_line_breaks")),
+                    toc_extension_config(config),
+                ),
+                theme.get("flex_rows"),
+            ),
             field_type,
         ),
         word=True,
     )
     html = _drop_empty_table_headers(html)
+    from ..toc import html_toc_to_marker
+
+    html = html_toc_to_marker(html)
 
     # Render mermaid diagrams to embedded PNGs, themed from the same CSS the PDF
     # uses so diagram colours match across formats. Falls back to leaving the
@@ -4450,8 +4550,12 @@ def build(
     except Exception:
         mermaid_theme = None
     html, mermaid_images = _render_mermaid_to_images(html, mermaid_theme)
+    html = _render_component_svgs(html, mermaid_images)
 
     doc = Document()
+    from ..bullets import apply_word_bullet
+
+    apply_word_bullet(doc, config)
     # Match the PDF's paper size + margins (parsed from the theme's @page) so
     # both formats share the same text width and break at the same points.
     geometry = _page_geometry(css_text)
@@ -4480,6 +4584,25 @@ def build(
         props.title = title
         if author:
             props.author = author
+    # Same document metadata the PDF carries (Subject / Keywords).
+    description = str(config.get("description") or "").strip()
+    if description:
+        props.subject = description
+    from ..pdf_features import keywords_of
+
+    keywords = keywords_of(config)
+    if keywords:
+        props.keywords = ", ".join(keywords)
+
+    # {title} in header/footer text is the document title (same token as the PDF).
+    config = {
+        **config,
+        **{
+            key: config[key].replace("{title}", title)
+            for key in ("header_text", "footer_left", "footer_center", "footer_right")
+            if isinstance(config.get(key), str)
+        },
+    }
 
     _add_page_header_bar(doc, config, doc_path, repo_root)
     _add_plain_header(doc, config, doc_path, repo_root)
@@ -4551,6 +4674,10 @@ def build(
     # formats break pages at the same places.
     html = _keep_heading_with_next(_merge_joined_field_boxes(html))
     builder.feed(html)
+    from ..toc import insert_word_caption_lists, insert_word_toc_fields
+
+    insert_word_toc_fields(doc, config)
+    insert_word_caption_lists(doc)
     _size_choice_lines(doc)
     _collapse_paragraph_margins(doc, builder._fixed_margins)
 

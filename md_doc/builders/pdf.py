@@ -37,7 +37,19 @@ import weasyprint  # noqa: E402
 from ..config import coerce_bool  # noqa: E402
 from ._cover import footer_band_geometry  # noqa: E402
 from ..forms import collapse_select_markup  # noqa: E402
+from ..renderer import BLANK_MARKER_RE  # noqa: E402
 from ._assets import _drop_empty_table_headers, apply_theme_config_defaults  # noqa: E402
+from ..table_layout import soften_long_tokens  # noqa: E402
+from ..pdf_features import (  # noqa: E402
+    chain_finishers,
+    color_profile_css,
+    expand_directives,
+    font_face_css,
+    layout_check_finisher,
+    pdf_zoom,
+    postprocess_html,
+    render_options,
+)
 
 
 def _reject_external(url: str) -> None:
@@ -78,6 +90,10 @@ def _make_url_fetcher() -> Any:
 
 
 # Markdown extensions to enable
+from ..bullets import bullet_css  # noqa: E402
+from ..toc import page_number_css  # noqa: E402
+from ..components import COMPONENT_CSS  # noqa: E402
+
 _MD_EXTENSIONS = [
     "tables",
     "fenced_code",
@@ -164,6 +180,20 @@ def _inject_page_breaks(md_content: str) -> str:
             '\n\n<div class="md-doc-page-break"></div>\n\n', body
         ),
     )
+
+
+_BLANK_SPACER = '\n\n<div class="md-doc-blank" style="height: 1em"></div>\n\n'
+
+
+def _inject_blank_lines(md_content: str) -> str:
+    """Turn the renderer's blank-line markers into spacer divs.
+
+    ``renderer.mark_blank_lines`` marks each blank line the author typed beyond
+    the first (before Jinja runs, so ``trim_blocks`` newline trimming around
+    ``{% %}`` tags cannot fake or hide any). The div is recognised by the PDF
+    (inline height) and the DOCX HTML walker (an empty paragraph).
+    """
+    return BLANK_MARKER_RE.sub(_BLANK_SPACER, md_content)
 
 
 _FORM_FIELD_RE = re.compile(r"\?\[(.+?)\]")
@@ -674,6 +704,10 @@ def _build_cover(
     bg = cover_cfg.get("cover_background", "white")
     meta_label = cover_cfg.get("cover_meta_label", "Prepared by")
     meta_author = cover_cfg.get("cover_meta_author", author)
+    subtitle = str(cover_cfg.get("cover_subtitle") or "").strip()
+    version = str(cover_cfg.get("cover_version") or "").strip()
+    show_meta = cover_cfg.get("cover_meta", True)
+    show_date = cover_cfg.get("cover_date", True)
     footer_text = cover_cfg.get("cover_footer_text") or f"{author}  ·  Confidential"
     show_footer = cover_cfg.get("cover_footer", True)
     show_footer_line = cover_cfg.get("cover_footer_line", True)
@@ -727,16 +761,30 @@ def _build_cover(
         else ""
     )
 
+    subtitle_html = f'<p class="cover-subtitle">{_escape_html(subtitle)}</p>' if subtitle else ""
+    version_html = f'<p class="cover-version">{_escape_html(version)}</p>' if version else ""
+    meta_lines = []
+    if meta_author:
+        meta_lines.append(
+            f"<strong>{_escape_html(meta_label)}</strong> {_escape_html(meta_author)}"
+        )
+    if show_date:
+        meta_lines.append(f"<strong>Date</strong> {_escape_html(date_str)}")
+    meta_html = (
+        '<p class="cover-meta">\n        ' + "<br>\n        ".join(meta_lines) + "\n      </p>"
+        if show_meta and meta_lines
+        else ""
+    )
+
     content_block = f"""\
     <div class="cover-content">
       {logo_html}
       <p class="cover-label">{_escape_html(label)}</p>
       <h1 class="cover-title">{_escape_html(title)}</h1>
+      {subtitle_html}
       {divider_html}
-      <p class="cover-meta">
-        <strong>{_escape_html(meta_label)}</strong> {_escape_html(meta_author)}<br>
-        <strong>Date</strong> {_escape_html(date_str)}
-      </p>
+      {version_html}
+      {meta_html}
     </div>"""
 
     if text_on_bar and show_bar and bar_pos in ("top", "both"):
@@ -913,8 +961,13 @@ _BASE_FIXES_CSS = (
     ".report-body h1[data-md-doc-first-heading] { page-break-before: auto; break-before: auto; }\n"
     ".running-date { display: block; position: absolute; visibility: hidden; width: 0; height: 0; overflow: hidden; }\n"
     ".report-body table + table { margin-top: 10pt; }\n"
-    ".report-body table :is(th, td) { overflow-wrap: anywhere; box-sizing: border-box; }\n"
-    ".report-body .md-doc-page-break { page-break-before: always; break-before: page; height: 0; margin: 0; padding: 0; }\n"
+    ".report-body table :is(th, td) { overflow-wrap: break-word; box-sizing: border-box; }\n"
+    ".report-body table .md-wrap { overflow-wrap: anywhere; }\n"
+    # A theme may break *after* the marker instead (`break-after: page`); with the
+    # forced break before it too, the zero-height marker would sit alone on an
+    # otherwise blank page. One break, before the marker, whatever the theme says.
+    ".report-body .md-doc-page-break { page-break-before: always; break-before: page; "
+    "page-break-after: auto; break-after: auto; height: 0; margin: 0; padding: 0; }\n"
     # WeasyPrint does not reliably carry break-inside:avoid from a keep-together
     # wrapper down to a list inside it, and then splits a heading's short list
     # across pages. Say it on the lists themselves.
@@ -1069,17 +1122,34 @@ def _build_html(
     page_margins_mm: tuple[float, float] = (25.0, 20.0),
     page_size_mm: tuple[float, float] = (210.0, 297.0),
     theme_body_justify: bool = False,
+    theme_css_text: str | None = None,
+    extra_head: str = "",
 ) -> str:
     css_uri = css_path.as_uri()
 
-    header_style = _build_header_style(
-        header_logo_uri,
-        header_logo_position,
-        header_text,
-        header_text_position,
-        page_header_bar=page_header_bar,
-        logo_dpi=header_logo_dpi,
-    )
+    from ..pdf_features import bar_layout, footer_bar, header_bar
+
+    run_html = ""
+    run_header = bar_layout(full_config or {}, "header_layout") == "running"
+    if run_header and not (page_header_bar or {}).get("enabled"):
+        header_html, header_style = header_bar(
+            full_config or {},
+            text=header_text,
+            text_position=header_text_position,
+            logo_uri=header_logo_uri,
+            logo_position=header_logo_position,
+            logo_height_mm=header_logo_max_mm,
+        )
+        run_html += header_html
+    else:
+        header_style = _build_header_style(
+            header_logo_uri,
+            header_logo_position,
+            header_text,
+            header_text_position,
+            page_header_bar=page_header_bar,
+            logo_dpi=header_logo_dpi,
+        )
 
     section_bar_style = _build_section_bar_style(full_config or {})
     body_align_style = _build_body_align_style(full_config or {}, theme_body_justify)
@@ -1094,7 +1164,30 @@ def _build_html(
         margin_right_mm=page_margins_mm[1],
     )
 
-    footer_style = _build_footer_style(footer_left, footer_center, footer_right)
+    if bar_layout(full_config or {}, "footer_layout") == "running":
+        footer_html, footer_style = footer_bar(
+            full_config or {}, footer_left, footer_center, footer_right
+        )
+        run_html += footer_html
+    else:
+        footer_style = _build_footer_style(footer_left, footer_center, footer_right)
+
+    from ..pdf_features import (
+        document_lang,
+        feature_css,
+        head_meta,
+        uses_running_titles,
+    )
+
+    features_style = feature_css(
+        full_config or {},
+        html_body=html_body,
+        cover_page=cover_page,
+        margins_mm=page_margins_mm,
+        stylesheets=(theme_css_text or "", header_style, footer_style),
+        running_titles=uses_running_titles(header_text, footer_left, footer_center, footer_right),
+    )
+    meta_tags = head_meta(full_config or {}, author=author)
 
     cover_html = ""
     cover_support_style = ""
@@ -1113,8 +1206,18 @@ def _build_html(
                 "/* ============================================\n   BASE"
             )
         ]
+        # cover-subtitle / cover-version sit before the theme link so a theme
+        # can restyle them.
+        cover_extra_rules = (
+            ".cover-subtitle { font-size: 12pt; font-weight: 700; line-height: 1.4;"
+            " color: #5d6d7e; margin: 0 0 8mm 0; }\n"
+            ".cover-version { font-size: 9.5pt; font-style: italic; line-height: 1.4;"
+            " color: #5d6d7e; margin: 0 0 4mm 0; }\n"
+            ".cover-text-on-bar .cover-subtitle, .cover-text-on-bar .cover-version { color: white; }\n"
+        )
         cover_base_style = (
-            f"<style>html, body {{ margin: 0; padding: 0; }}{cover_page_rules}{cover_rules}</style>"
+            f"<style>html, body {{ margin: 0; padding: 0; }}{cover_page_rules}{cover_rules}"
+            f"{cover_extra_rules}</style>"
         )
         cover_html = f"  <!-- COVER PAGE -->\n{_build_cover(title, author, date_str, cover_cfg or {}, cover_logo_uri, bar_logo_uri=cover_bar_logo_uri, primary_color=primary_color)}"
         # Behaviour classes the cover HTML emits (cover_text_align,
@@ -1138,11 +1241,13 @@ def _build_html(
         )
 
     return f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="{_escape_html(document_lang(full_config or {}))}">
 <head>
   <meta charset="utf-8">
   <title>{_escape_html(title)}</title>
+  {meta_tags}
   {cover_base_style}
+  <style>{COMPONENT_CSS}{bullet_css(cover_cfg)}{page_number_css(cover_cfg)}</style>
   <link rel="stylesheet" href="{css_uri}">
   {_BASE_FIXES_CSS}
   {header_style}
@@ -1153,8 +1258,11 @@ def _build_html(
   {_form_support_css(primary_color) if is_form else ""}
   {css_vars_style}
   {page_bar_css}
+  {extra_head}
+  {features_style}
 </head>
 <body>
+{run_html}
 {cover_html}
   {page_bar_html}
   <!-- REPORT BODY -->
@@ -1176,7 +1284,7 @@ _FOOTER_POSITIONS = {
 }
 
 
-_PAGE_TOKEN_RE = re.compile(r"(\{pages?\})")
+_PAGE_TOKEN_RE = re.compile(r"(\{(?:pages?|chapter|section)\})")
 
 
 def _css_string(text: str) -> str:
@@ -1194,7 +1302,8 @@ def _css_content_value(text: str) -> str:
 
     Literal segments become quoted strings; ``{page}``/``{pages}`` become
     ``counter(page)``/``counter(pages)`` so PDF page numbers work with the same
-    tokens the docx footer understands.
+    tokens the docx footer understands. ``{chapter}``/``{section}`` read the
+    running H1/H2 titles (PDF only; see ``pdf_features.feature_css``).
     """
     out: list[str] = []
     for part in _PAGE_TOKEN_RE.split(text):
@@ -1202,6 +1311,10 @@ def _css_content_value(text: str) -> str:
             out.append("counter(page)")
         elif part == "{pages}":
             out.append("counter(pages)")
+        elif part == "{chapter}":
+            out.append("string(md-chapter, first)")
+        elif part == "{section}":
+            out.append("string(md-section, last)")
         elif part:
             out.append(f"'{_css_string(part)}'")
     return " ".join(out) if out else "''"
@@ -1285,7 +1398,7 @@ def _build_header_style(
         if text:
             pos = _HEADER_POSITIONS.get(text_position, "@top-left")
             rules.append(
-                f"  {pos} {{ content: '{_css_string(text)}'; "
+                f"  {pos} {{ content: {_css_content_value(text)}; "
                 f"font-size: 8pt; color: #5d6d7e; vertical-align: middle; }}"
             )
             cover_overrides.append(f"  {pos} {{ content: none; }}")
@@ -1741,13 +1854,21 @@ def build(
     if repo_root is None:
         repo_root = _find_repo_root(out_path.parent)
 
+    def resolve_config_path(value: str | None) -> Path | None:
+        """Fonts, attachments, ICC/XMP files: same confined lookup as logos."""
+        return _resolve_logo(value, repo_root, doc_path)
+
     # Resolve the theme up front: --mddoc-* custom properties in it provide
     # brand defaults for the look-related config keys (YAML always wins).
     css_path = _resolve_css(config, repo_root, doc_path=doc_path)
     css_text: str | None = None
     if css_path and css_path.exists():
         try:
-            css_text = css_path.read_text(encoding="utf-8")
+            # Follow @import so --mddoc-* defaults, Mermaid colours and @page
+            # geometry in a shared _theme.css reach themes that import it.
+            from ..docx_theme import _load_css_with_imports
+
+            css_text = _load_css_with_imports(css_path)
         except OSError:
             css_text = None
     config = apply_theme_config_defaults(config, css_text)
@@ -1785,6 +1906,14 @@ def build(
     footer_left: str | None = config.get("footer_left")
     footer_center: str | None = config.get("footer_center")
     footer_right: str | None = config.get("footer_right")
+
+    def _with_title(text: Any) -> Any:
+        return text.replace("{title}", title) if isinstance(text, str) else text
+
+    header_text = _with_title(header_text)
+    footer_left, footer_center, footer_right = (
+        _with_title(t) for t in (footer_left, footer_center, footer_right)
+    )
 
     page_header_bar: dict[str, Any] | None = None
     if config.get("page_header_bar"):
@@ -1824,15 +1953,48 @@ def build(
         body = _strip_leading_h1(body)
     from ..pagination import inject_section_breaks, pdf_sections
 
-    body = inject_section_breaks(_inject_page_breaks(body))
+    body = inject_section_breaks(_inject_page_breaks(_inject_blank_lines(body)))
+    body = expand_directives(body)
 
     is_form = bool(config.get("pdf_forms"))
     body = _expand_form_fields(collapse_select_markup(body), is_form)
+    from ..components import expand_components
+
+    body = expand_components(body, "pdf")
 
     from ..math import markdown_html, render_math
+    from ..toc import toc_extension_config
 
-    html_body, _ = render_math(markdown_html(body, _MD_EXTENSIONS))
+    html_body, _ = render_math(
+        markdown_html(
+            body,
+            _MD_EXTENSIONS,
+            coerce_bool(config.get("preserve_line_breaks")),
+            toc_extension_config(config),
+        )
+    )
     html_body = _drop_empty_table_headers(html_body)
+    html_body = postprocess_html(html_body, config)
+    html_body = re.sub(
+        r"<table\b.*?</table>", lambda m: soften_long_tokens(m.group(0)), html_body, flags=re.DOTALL
+    )
+    if "table-striping:" in html_body:
+        from ..table_striping import mark_group_stripes
+
+        html_body = mark_group_stripes(html_body)
+        stripe_bg = "#edf1f5"
+        if css_text:
+            stripe_rule = re.search(
+                r"tr\s*:\s*nth-child\(even\)\s+td\s*\{[^}]*background(?:-color)?\s*:\s*([^;}]+)",
+                css_text,
+                re.I,
+            )
+            if stripe_rule:
+                stripe_bg = stripe_rule.group(1).strip()
+        html_body = (
+            f"<style>.md-doc-group-alt td {{ background: {stripe_bg} !important; }} "
+            ".md-doc-group-base td { background: transparent !important; }</style>" + html_body
+        )
     # Mark before keep-with-next wrappers are inserted; direct-child selectors
     # otherwise miss a leading heading after an included letterhead.
     html_body = re.sub(r"<h1\b", '<h1 data-md-doc-first-heading="true"', html_body, count=1)
@@ -1916,19 +2078,33 @@ def build(
         page_margins_mm=page_margins_mm,
         page_size_mm=page_size_mm,
         theme_body_justify=theme_body_justify,
+        theme_css_text=css_text,
+        extra_head=font_face_css(config, resolve_config_path)
+        + color_profile_css(config, resolve_config_path),
     )
 
     if section_css:
         html = html.replace("</head>", f"<style>{section_css}</style></head>")
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    wp_kwargs: dict[str, Any] = {}
+    wp_kwargs: dict[str, Any] = render_options(
+        config,
+        resolve=resolve_config_path,
+        rendered_md=rendered_md,
+        doc_path=doc_path,
+    )
+    zoom = pdf_zoom(config)
+    if zoom is not None:
+        wp_kwargs["zoom"] = zoom
+    finishers: list[Any] = []
     if is_form:
         wp_kwargs["pdf_forms"] = True
         # Patch metadata WeasyPrint drops (required/readonly/tooltip/defaults).
         field_meta = _collect_form_field_meta(html_body)
         if field_meta:
-            wp_kwargs["finisher"] = _make_forms_finisher(field_meta)
+            finishers.append(_make_forms_finisher(field_meta))
+    finishers.append(layout_check_finisher(strict=coerce_bool(config.get("pdf_layout_check"))))
+    wp_kwargs["finisher"] = chain_finishers(*finishers)
     _write_pdf(
         html,
         str(doc_path.resolve().parent if doc_path is not None else out_path.parent),
@@ -1937,8 +2113,30 @@ def build(
     )
 
 
+_IMAGE_CACHE: dict[Any, Any] | None = None
+
+
+def use_shared_image_cache(enabled: bool = True) -> None:
+    """Share WeasyPrint's decoded-image cache between documents in this process.
+
+    ``md-doc build`` turns this on for a run (and in each worker of ``-j``), so a
+    logo used by many documents is read and decoded once. It stays off for
+    long-lived callers such as the editor, where a file can change between builds.
+    """
+    global _IMAGE_CACHE
+    _IMAGE_CACHE = {} if enabled else None
+
+
 def _write_pdf(html: str, base_url: str, out_path: Path, options: dict[str, Any]) -> None:
-    """Output boundary shared with the editor's isolated preview worker."""
+    """Output boundary shared with the editor's isolated preview worker.
+
+    *options* holds only genuine WeasyPrint ``write_pdf`` options (including
+    ``finisher`` and ``zoom``), so the editor can forward them untouched.
+    """
+    from weasyprint.text.fonts import FontConfiguration
+
+    if _IMAGE_CACHE is not None:
+        options = {**options, "cache": _IMAGE_CACHE}
     weasyprint.HTML(string=html, base_url=base_url, url_fetcher=_make_url_fetcher()).write_pdf(
-        str(out_path), **options
+        str(out_path), font_config=FontConfiguration(), **options
     )

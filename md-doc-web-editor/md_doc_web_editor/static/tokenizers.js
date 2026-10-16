@@ -30,7 +30,7 @@
         'cover_bar_top_height', 'cover_bar_bottom_height', 'cover_text_on_bar',
         'cover_stripe', 'cover_stripe_height', 'cover_stripe_width',
         'cover_footer', 'cover_footer_text', 'cover_footer_line',
-        'cover_footer_color', 'cover_meta_label', 'cover_meta_author',
+        'cover_footer_color', 'cover_meta_label', 'cover_meta_author', 'cover_meta', 'cover_date', 'cover_subtitle', 'cover_version', 'bullet_style', 'bullet_color', 'toc_title', 'toc_depth', 'toc_page_numbers',
         // Page header bar
         'page_header_bar', 'page_header_bar_color', 'page_header_bar_text_color',
         'page_header_bar_height', 'page_header_bar_padding',
@@ -48,10 +48,23 @@
         // Export / vault
         'export', 'export_format', 'export_path', 'export_filename', 'draft', 'tags',
         // Layout, tables and slides
-        'table_col_widths', 'css_vars', 'header_logo_height', 'page_header_bar_offset',
+        'table_col_widths', 'preserve_blank_lines', 'preserve_line_breaks', 'css_vars', 'header_logo_height', 'page_header_bar_offset',
         'pptx_template', 'slide_size', 'slide_split',
         // Export destination
         'export_folder',
+        // PDF container, production and print
+        'pdf_variant', 'pdf_version', 'pdf_identifier', 'pdf_tags', 'pdf_custom_metadata',
+        'pdf_presentational_hints', 'pdf_optimize_images', 'pdf_jpeg_quality', 'pdf_image_dpi',
+        'pdf_uncompressed', 'pdf_srgb', 'pdf_full_fonts', 'pdf_hinting', 'pdf_zoom',
+        'pdf_attach_source', 'pdf_attachments', 'pdf_xmp', 'pdf_color_profile',
+        'pdf_bookmarks', 'pdf_bookmark_depth', 'pdf_layout_check',
+        'description', 'keywords', 'print_marks', 'bleed',
+        // Typography, numbering, navigation and page layout (PDF)
+        'lang', 'fonts', 'font_features', 'tabular_numbers', 'hyphenate',
+        'page_footnotes', 'xref_pages', 'numbered_headings', 'numbered_headings_depth',
+        'heading_number_style', 'duplex', 'binding_margin', 'chapter_break',
+        'header_first_page', 'header_layout', 'footer_layout',
+        'columns', 'column_gap', 'column_rule', 'image_fit', 'image_resolution',
         // Client / engagement fields (common user-defined cascade keys)
         'client', 'client_abn', 'client_contact', 'account_manager',
         'support_email', 'alert_email',
