@@ -7,6 +7,62 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Backslash line breaks.** A backslash at the end of a line is now a hard line break in PDF,
+  Word, `.dotx` and slides, as in CommonMark, GitHub and Pandoc (it printed a literal `\`
+  before). Code, display maths, table rows, an escaped `\\` and a paragraph-ending backslash are
+  left alone. Two trailing spaces and `preserve_line_breaks: true` work as before.
+- **Editor: separate Documents and Templates areas in the file tree.** Workspaces with `templates/`
+  folders show two collapsible areas with sticky headings and counts; *Only* focuses one area and
+  *Show all* restores both. Templates keep their folder path so you can see where each level's
+  templates live.
+- **Shared macros inherit the folder they are used in.** Imported macros now see the config
+  variables of the document that uses them (previously `{{ client }}` was blank inside a macro
+  imported from another file), and macro libraries (`macros.md`, `*-macros.md`, `*_macros.md`)
+  layer along the `templates/` cascade instead of the deepest file hiding the shared one, so a
+  folder can add or replace single macros and inherit the rest.
+- **Handbook: logic in templates.** A full guide to Jinja2 in documents: conditions, loops, tables
+  from data, `set` and totals, filters, macros, includes with logic, whitespace, escaping literal
+  braces (code blocks are rendered too), strict mode and errors, and what build-time logic cannot do
+  (`docs/handbook.md#markdown-logic-in-templates`).
+- **Popup menus instead of dialogs in the editor.** The **+** button opens a scaffold menu and
+  creates the document straight away; right-clicking a folder (or the root) offers import and
+  new-document/folder actions, and right-clicking a file offers rename, move, duplicate and
+  trash. The last folder clicked is highlighted and is where new files go.
+- **Import in the web editor, without dialogs.** Pick files from the upload button, a folder's
+  right-click menu, a drag onto a folder, or the command palette; they are converted and saved
+  at once, the first opens, and a toast offers Undo. *Import into this document* (palette, or
+  drop on the editor) inserts at the cursor. Embedded Word images go under `assets/`, merge
+  fields are added to `_merge_fields.yml`, new documents get starter frontmatter (title,
+  original output name, `imported_from`, `imported_on`), and taken names get `-2`. The three
+  options are under Settings.
+- **`md-doc extract` reads more.** `.dotx`, `.pptx`, `.html` and (with `uv sync --extra xlsx`)
+  `.xlsx`, and Word merge fields, text form fields and plain-text content controls come
+  back as `[[field]]`; the command lists the fields it found.
+- **CriticMarkup review marks.** `{++add++}`, `{--delete--}`, `{~~old~>new~~}`,
+  `{==highlight==}{>>comment<<}` in Markdown. `review_markup: accept | reject | show` (default
+  `accept`; also `md-doc build --review`) applies, reverts or shows them: coloured marks and
+  comment footnotes in PDF, real Word tracked changes and comments (`review_author`) in `.docx`,
+  slides always accept. `md-doc extract` turns Word tracked changes and comments back into the
+  marks; `md-doc lint` reports unclosed marks and warns about marks left in a `status: final`
+  document; the browser editor highlights them. Guide: `docs/handbook.md#markdown-review-markup`.
+- **Review markup is easier to read, and kept apart from the document's own styling.**
+  Marked-up PDFs and Word files start with a key (reviewer, counts, what the colours and bars
+  mean); PDF insertions and deletions have a coloured wash. PDF comments are notes in a review column in the
+  right margin, level with their line, in neutral grey type that cannot be mistaken for a
+  callout; each is colour-matched to a light tint and underline on its text (no numbers; ten colours). Notes are grouped into one card per paragraph, list item or table row, level with that block, and colliding stacks are centred on their anchors. The page gets the
+  column by widening, then the PDF is scaled back to paper size (the document shrinks, as in
+  Word's all-markup view) with the text area
+  unchanged, so line and page breaks match the clean version.
+- **Hybrid markup.** `review_markup: hybrid` (also `--review hybrid` and a `review_exports`
+  variant) shows the final text with a light highlight and a margin bar on each change, and writes
+  every change out in the review column (`ADDED` / `DELETED` / `CHANGED old → new`) beside its line,
+  with the comments. Word treats it as `show`. Review-column text is larger (11 pt before the
+  shrink) and the column wider (72 mm).
+- **Simple markup and multi-version review exports.** `review_markup: simple` gives the final
+  text with a change bar in the right-hand margin beside each changed block (one aligned strip;
+  a Word paragraph border, or a PDF bar drawn from the laid-out block) and the highlights and
+  comments kept. `review_exports: [clean, original, simple, markup]` builds
+  one file per version in a single run (`-clean`, `-original`, `-simple`, `-markup` suffixes).
 - **PDF features.** Everything WeasyPrint offers beyond a plain HTML → PDF call is now a config
   key (full guide: `docs/handbook.md#pdf-features`):
   - *Container:* `pdf_variant` (PDF/A, PDF/UA, PDF/X), `pdf_tags`, `pdf_identifier`,

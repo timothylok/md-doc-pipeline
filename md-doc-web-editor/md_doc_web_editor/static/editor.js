@@ -19,6 +19,7 @@
     "chevron-down": "m7 9 5 5 5-5",
     "chevron-right": "m9 6 6 6-6 6",
     "chevron-left": "m15 6-6 6 6 6",
+    layers: "M12 3 3 8l9 5 9-5Z M3 12l9 5 9-5 M3 16l9 5 9-5",
     list: "M9 6h12 M9 12h12 M9 18h12 M3 6h.01 M3 12h.01 M3 18h.01",
     git: "M6 3v12a4 4 0 0 0 4 4h6 M18 5v9 M6 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4 M18 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4 M18 21a2 2 0 1 0 0-4 2 2 0 0 0 0 4",
     external: "M14 3h7v7 M21 3l-9 9 M10 3H3v18h18v-7",
@@ -199,6 +200,8 @@
       throw error;
     }
     if (data.artifact) data.artifact.url = workspaceUrl(data.artifact.url);
+    // The quick "visible page" previews are artifacts too and need the workspace.
+    for (const page of data.preview_pages ?? []) page.url = workspaceUrl(page.url);
     return data;
   }
   function toast(message, error = false, action = null) {
@@ -437,6 +440,10 @@
                   (error) => toast(error.message, true),
                 );
             });
+            // Right-click inside a chart block: Edit chart…
+            window.ChartWizard?.bindEditor(state.editor, () =>
+              current() ? chartHost() : null,
+            );
             state.editor.addAction({
               id: "md-doc.edit-include",
               label: "Edit included template inline",
@@ -524,6 +531,30 @@
     }
     renderTree();
   }
+  // Templates live in any folder called "templates"; they get their own collapsible area.
+  const inTemplates = (path) => /(^|\/)templates(\/|$)/.test(path);
+  const countDocs = (nodes) =>
+    nodes.reduce((n, node) => n + (node.type === "dir" ? countDocs(node.children) : node.type === "md" ? 1 : 0), 0);
+  // The tree restricted to templates (templates = true) or to everything else.
+  function pruneTree(nodes, templates) {
+    const out = [];
+    for (const node of nodes) {
+      if (node.type !== "dir") {
+        if (inTemplates(node.path) === templates) out.push(node);
+        continue;
+      }
+      const children = pruneTree(node.children, templates);
+      const emptyOriginal = !node.children.length && inTemplates(node.path) === templates;
+      if (children.length || emptyOriginal)
+        out.push({ ...node, children, documentCount: countDocs(children) });
+    }
+    return out;
+  }
+  const treeSections = () => readStorage("treeSections", {});
+  function setTreeSections(value) {
+    store("treeSections", value);
+    renderTree();
+  }
   function renderTree() {
     const collapsed = readStorage("rootCollapsed", false);
     $("md-doc-tree").hidden = state.nav !== "files" || collapsed;
@@ -551,6 +582,7 @@
           if (filter && !children.childElementCount) continue;
           const item = el("li");
           const details = el("details", "tree-folder");
+          details.dataset.path = node.path;
           details.open =
             !!filter || readStorage("folders", []).includes(node.path);
           const summary = el("summary");
@@ -570,6 +602,12 @@
             el("span", "folder-name", node.name),
             badge,
           );
+          summary.dataset.folder = node.path;
+          summary.addEventListener("click", () => pickFolder(node.path));
+          summary.addEventListener("contextmenu", (event) => {
+            event.preventDefault();
+            folderMenu(node.path, event);
+          });
           summary.title = node.scanError
             ? node.path + ": " + node.scanError
             : node.path;
@@ -586,6 +624,10 @@
                 "d",
                 icons[details.open ? "folder-open" : "folder"],
               );
+            // The same folder can appear in both the Documents and Templates areas.
+            for (const twin of document.querySelectorAll("details.tree-folder"))
+              if (twin !== details && twin.dataset.path === node.path && twin.open !== details.open)
+                twin.open = details.open;
             if (filter) return;
             const folders = new Set(readStorage("folders", []));
             details.open ? folders.add(node.path) : folders.delete(node.path);
@@ -626,7 +668,7 @@
           button.onclick = () => openFile(node.path);
           button.oncontextmenu = (event) => {
             event.preventDefault();
-            fileActions(node.path);
+            fileActions(node.path, { x: event.clientX, y: event.clientY });
           };
           item.append(button);
           list.append(item);
@@ -634,9 +676,51 @@
       }
       return list;
     };
-    const list = build(state.tree);
-    $("md-doc-tree").append(list);
-    if (!list.childElementCount)
+    const hasTemplates = state.files.some((file) => inTemplates(file.path)) ||
+      (function anyDir(nodes) {
+        return nodes.some((node) => node.type === "dir" && (inTemplates(node.path) || anyDir(node.children)));
+      })(state.tree);
+    const areas = hasTemplates
+      ? [
+          ["documents", "Documents", false],
+          ["templates", "Templates", true],
+        ]
+      : [["all", null, false]];
+    const collapsedAreas = treeSections();
+    let shown = 0;
+    for (const [key, label, templates] of areas) {
+      const nodes = key === "all" ? state.tree : pruneTree(state.tree, templates);
+      const list = build(nodes);
+      if (!list.childElementCount) continue;
+      shown++;
+      if (!label) {
+        $("md-doc-tree").append(list);
+        continue;
+      }
+      const collapsed = !filter && !!collapsedAreas[key];
+      const other = key === "documents" ? "templates" : "documents";
+      const onlyThis = !collapsedAreas[key] && !!collapsedAreas[other];
+      const head = el("div", "tree-section-head");
+      const toggle = el("button", "tree-section-toggle");
+      toggle.type = "button";
+      toggle.setAttribute("aria-expanded", String(!collapsed));
+      toggle.title = (collapsed ? "Expand " : "Collapse ") + label.toLowerCase();
+      toggle.append(icon("chevron-down"), el("span", null, label), el("span", "document-count", String(countDocs(nodes))));
+      toggle.onclick = () => setTreeSections({ ...collapsedAreas, [key]: !collapsedAreas[key] });
+      const focus = el("button", "tree-section-focus", onlyThis ? "Show all" : "Only");
+      focus.type = "button";
+      focus.title = onlyThis ? "Show both areas" : `Show only ${label.toLowerCase()}`;
+      focus.onclick = () => setTreeSections(onlyThis ? {} : { [key]: false, [other]: true });
+      head.append(toggle, focus);
+      list.hidden = collapsed;
+      $("md-doc-tree").append(head, list);
+    }
+    markTargetFolder();
+    $("tree-root-toggle").oncontextmenu = (event) => {
+      event.preventDefault();
+      folderMenu("", event);
+    };
+    if (!shown)
       $("md-doc-tree").append(
         el(
           "p",
@@ -1018,6 +1102,9 @@
     if (previous && state.editor)
       previous.viewState = state.editor.saveViewState();
     state.active = path;
+    state.targetFolder = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+    state.folderPicked = false;
+    markTargetFolder();
     const buffer = current();
     buffer.tabHidden = false;
     state.switching = true;
@@ -1907,6 +1994,7 @@
       files: "FILES",
       search: "SEARCH",
       outline: "OUTLINE",
+      shared: "SHARED CONTENT",
       git: "SOURCE CONTROL",
     };
     $("sidebar-title").textContent = titles[name];
@@ -1914,6 +2002,7 @@
       "md-doc-tree",
       "search-panel",
       "outline-panel",
+      "shared-panel",
       "git-panel",
     ])
       $(id).hidden =
@@ -1923,6 +2012,7 @@
             files: "md-doc-tree",
             search: "search-panel",
             outline: "outline-panel",
+            shared: "shared-panel",
             git: "git-panel",
           }[name];
     $("file-filter").hidden = name !== "files";
@@ -1932,6 +2022,7 @@
     $("workbench").classList.remove("nav-hidden");
     if (window.innerWidth <= 850) $("workbench").classList.toggle("mobile-nav");
     if (name === "search") $("workspace-query").focus();
+    if (name === "shared") openShared();
     if (name === "git") loadGit().catch((error) => toast(error.message, true));
     applyLayout();
   }
@@ -2690,99 +2781,450 @@
       );
     dialog("Workspace layout", body);
   }
-  async function newDocument() {
-    const parent = state.active?.includes("/")
-      ? state.active.slice(0, state.active.lastIndexOf("/") + 1)
-      : "";
+  // ── Popup menus ──────────────────────────────────────────────────────────
+  // Non-modal: opens at an element or a point, closes on click-away or Esc.
+  const menuAnchor = () =>
+    state.lastActionEl?.isConnected ? state.lastActionEl : { x: 240, y: 110 };
+  function popupMenu(anchor, label, entries) {
+    $("popup-menu")?.remove();
+    const opener = document.activeElement;
+    const body = el("div", "insert-submenu");
+    body.id = "popup-menu";
+    // "manual": a right-click opens this on mouse-down on some platforms, and the
+    // following mouse-up would light-dismiss an "auto" popover straight away.
+    body.setAttribute("popover", "manual");
+    body.setAttribute("role", "menu");
+    body.setAttribute("aria-label", label);
+    for (const [title, description, iconName, run] of entries)
+      body.append(option(title, description, iconName, run));
+    const items = [...body.querySelectorAll("button")];
+    items.forEach((button) => {
+      button.setAttribute("role", "menuitem");
+      button.tabIndex = -1;
+      button.addEventListener("click", () => body.hidePopover(), { capture: true });
+    });
+    body.onkeydown = (event) => {
+      const index = items.indexOf(document.activeElement);
+      let next;
+      if (event.key === "ArrowDown") next = (index + 1) % items.length;
+      else if (event.key === "ArrowUp") next = (index - 1 + items.length) % items.length;
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = items.length - 1;
+      else if (event.key === "Escape" || event.key === "Tab") {
+        body.hidePopover();
+        opener?.focus?.();
+        if (event.key === "Escape") event.preventDefault();
+        return;
+      } else return;
+      event.preventDefault();
+      items[next].focus();
+    };
+    const dismiss = (event) => {
+      if (!body.contains(event.target)) body.hidePopover();
+    };
+    document.addEventListener("pointerdown", dismiss, true);
+    body.addEventListener("toggle", () => {
+      if (body.matches(":popover-open")) return;
+      document.removeEventListener("pointerdown", dismiss, true);
+      body.remove();
+    });
+    document.body.append(body);
+    body.showPopover();
+    const rect = anchor.getBoundingClientRect
+      ? anchor.getBoundingClientRect()
+      : { left: anchor.x, right: anchor.x, top: anchor.y, bottom: anchor.y };
+    body.style.left =
+      Math.max(8, Math.min(rect.left, window.innerWidth - body.offsetWidth - 8)) + "px";
+    body.style.top =
+      (rect.bottom + body.offsetHeight + 8 <= window.innerHeight
+        ? rect.bottom + 6
+        : Math.max(8, rect.top - body.offsetHeight - 6)) + "px";
+    items[0].focus();
+  }
+
+  // ── Which folder new files go to ─────────────────────────────────────────
+  // The last folder clicked in the tree, else the open document's folder.
+  // Opening a file moves it to that file's folder.
+  const importDirOf = (path) =>
+    path.includes("/") ? path.slice(0, path.lastIndexOf("/") + 1) : "";
+  const targetDir = () =>
+    state.targetFolder != null
+      ? state.targetFolder
+        ? state.targetFolder + "/"
+        : ""
+      : importDirOf(state.active ?? "");
+  function markTargetFolder() {
+    for (const row of document.querySelectorAll("summary[data-folder]"))
+      row.classList.toggle(
+        "target",
+        !!state.folderPicked && row.dataset.folder === state.targetFolder,
+      );
+  }
+  function pickFolder(path) {
+    state.targetFolder = path;
+    state.folderPicked = true;
+    markTargetFolder();
+  }
+  // Paths already in the workspace; a taken name gets the next free "-2" style one.
+  const importTaken = () => new Set(state.files.map((file) => file.path));
+  function freeImportPath(path, taken) {
+    if (!taken.has(path)) return path;
+    const [, base, ext = ""] = path.match(/^(.*?)(\.[^./]+)?$/);
+    for (let n = 2; ; n++) if (!taken.has(`${base}-${n}${ext}`)) return `${base}-${n}${ext}`;
+  }
+
+  // ── New document / folder ────────────────────────────────────────────────
+  const SCAFFOLDS = [
+    ["report", "Report", "Cover page, PDF and Word output", "file"],
+    ["form", "Fillable form", "Interactive PDF form fields", "edit"],
+    ["deck", "Slide deck", "PowerPoint slides", "columns"],
+    ["blank", "Blank document", "Just a heading", "file-plus"],
+  ];
+  function scaffold(kind, title) {
+    return {
+      report: `---\ntitle: ${JSON.stringify(title)}\noutputs: [pdf, docx]\ncover_page: true\n---\n\n# ${title}\n\n## Overview\n\nStart writing your report here.\n`,
+      form: `---\ntitle: ${JSON.stringify(title)}\npdf_forms: true\n---\n\n# ${title}\n\n## Contact details\n\nName: ?[text: contact_name, required]\n\nEmail: ?[email: email, required]\n`,
+      deck: `---\ntitle: ${JSON.stringify(title)}\noutputs: [pptx]\nslide_size: "16:9"\n---\n\n# ${title}\n\n## First slide\n\n- First point\n- Second point\n`,
+      blank: `# ${title}\n\n`,
+    }[kind];
+  }
+  // Creates untitled.md (or the next free name) and opens it; rename it from the file menu.
+  async function createDocument(kind) {
+    const path = freeImportPath(targetDir() + "untitled.md", importTaken());
+    const title = path.split("/").pop().replace(/\.md$/, "").replace(/[-_]/g, " ");
+    await api("/api/files/action", {
+      method: "POST",
+      body: JSON.stringify({ action: "new", path, content: scaffold(kind, title) }),
+    });
+    await loadTree();
+    await openFile(path);
+  }
+  const newDocumentMenu = (anchor = menuAnchor()) =>
+    popupMenu(
+      anchor,
+      "New document",
+      SCAFFOLDS.map(([kind, label, description, iconName]) => [
+        label,
+        description,
+        iconName,
+        () => createDocument(kind),
+      ]),
+    );
+  function newFolderDialog(prefix = targetDir()) {
     dialog(
-      "Create a document",
-      `<p>Start with a document scaffold. Settings are inherited from the folder.</p><label for="new-path">File path</label><input class="input" id="new-path" value="${escape(parent)}untitled.md"><label for="new-kind">Document type</label><select class="input" id="new-kind"><option value="report">Report</option><option value="form">Fillable PDF form</option><option value="deck">Slide deck</option><option value="blank">Blank document</option></select>`,
+      "Create a folder",
+      `<label for="folder-path">Folder path</label><input class="input" id="folder-path" value="${escape(prefix)}" placeholder="clients/new-client">`,
       [
         { label: "Cancel", run: (d) => d.close() },
         {
-          label: "Create document",
+          label: "Create folder",
           primary: true,
           run: async (d) => {
-            const path = $("new-path").value.trim();
-            const kind = $("new-kind").value;
-            const title = path
-              .split("/")
-              .pop()
-              .replace(/\.md$/, "")
-              .replace(/[-_]/g, " ");
-            const sources = {
-              report: `---\ntitle: ${JSON.stringify(title)}\noutputs: [pdf, docx]\ncover_page: true\n---\n\n# ${title}\n\n## Overview\n\nStart writing your report here.\n`,
-              form: `---\ntitle: ${JSON.stringify(title)}\npdf_forms: true\n---\n\n# ${title}\n\n## Contact details\n\nName: ?[text: contact_name, required]\n\nEmail: ?[email: email, required]\n`,
-              deck: `---\ntitle: ${JSON.stringify(title)}\noutputs: [pptx]\nslide_size: "16:9"\n---\n\n# ${title}\n\n## First slide\n\n- First point\n- Second point\n`,
-              blank: `# ${title}\n\n`,
-            };
             await api("/api/files/action", {
               method: "POST",
-              body: JSON.stringify({
-                action: "new",
-                path,
-                content: sources[kind],
-              }),
+              body: JSON.stringify({ action: "folder", path: $("folder-path").value.trim() }),
             });
             d.close();
             await loadTree();
-            await openFile(path);
           },
         },
       ],
     );
   }
-  function fileActions(path = state.active) {
-    const body = el("div");
-    if (path) {
-      body.append(el("p", null, path));
+  function folderMenu(path, event) {
+    pickFolder(path);
+    popupMenu({ x: event.clientX, y: event.clientY }, "Folder actions", [
+      [
+        "Import documents here",
+        "Word, PowerPoint, Excel, HTML or PDF",
+        "upload",
+        () => chooseImportFiles((files) => importFiles(files)),
+      ],
+      ...SCAFFOLDS.map(([kind, label, description, iconName]) => [
+        "New " + label.toLowerCase() + " here",
+        description,
+        iconName,
+        () => createDocument(kind),
+      ]),
+      ["New folder here", "Create a subfolder", "folder", () => newFolderDialog(path ? path + "/" : "")],
+    ]);
+  }
+
+  // ── Import ───────────────────────────────────────────────────────────────
+  // No dialogs: pick files, they are converted and saved straight away, the first
+  // opens in the editor, and a toast reports what happened with an Undo.
+  const IMPORT_TYPES = ".docx,.dotx,.pptx,.xlsx,.html,.htm,.pdf";
+  const importOption = (name) => readStorage("import-" + name, true);
+  const importStem = (name) =>
+    name
+      .replace(/\.[^.]+$/, "")
+      .replace(/[^A-Za-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .toLowerCase() || "import";
+  const stripImportImages = (markdown) =>
+    markdown.replace(/!\[[^\]]*\]\(import-image-\d+\.\w+\)\n*/g, "");
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(",")[1]);
+      reader.onerror = () => reject(new Error("The file could not be read"));
+      reader.readAsDataURL(file);
+    });
+  }
+  function chooseImportFiles(onFiles) {
+    const input = $("import-file-input");
+    input.accept = IMPORT_TYPES;
+    input.value = "";
+    input.onchange = () => {
+      const files = [...input.files];
+      if (files.length) onFiles(files).catch((error) => toast(error.message, true));
+    };
+    input.click();
+  }
+  function explainImportError(error) {
+    return error.status === 404 && error.message === "Not Found"
+      ? "This editor server does not have the import feature. Update md-doc-pipeline and md-doc-web-editor, then restart md-doc-edit."
+      : error.message;
+  }
+  async function convertForImport(file) {
+    try {
+      return await api("/api/import", {
+        method: "POST",
+        body: JSON.stringify({ name: file.name, data: await fileToBase64(file), images: true }),
+      });
+    } catch (error) {
+      throw new Error(`${file.name}: ${explainImportError(error)}`);
+    }
+  }
+  // Saves each extracted image under <dir>assets/ and returns the Markdown pointing
+  // at the stored files (collisions get a numeric suffix). Stored paths go in `created`.
+  async function storeImportedImages(markdown, images, dir, stem, created) {
+    for (const image of images) {
+      const ext = image.name.split(".").pop();
+      const base = image.name.replace(/^import-image-/, "").replace(/\.\w+$/, "");
+      let stored = null;
+      for (let attempt = 1; attempt <= 50 && !stored; attempt++) {
+        const name = `${stem}-${base}${attempt > 1 ? "-" + attempt : ""}.${ext}`;
+        try {
+          await api("/api/assets", {
+            method: "POST",
+            body: JSON.stringify({ path: `${dir}assets/${name}`, data: image.data }),
+          });
+          stored = name;
+          created.push(`${dir}assets/${name}`);
+        } catch (error) {
+          if (!/already exists/.test(error.message)) throw error;
+        }
+      }
+      if (!stored) throw new Error("Could not find a free filename for " + image.name);
+      markdown = markdown.split(`](${image.name})`).join(`](assets/${stored})`);
+    }
+    return markdown;
+  }
+  // Appends the fields that _merge_fields.yml does not already describe.
+  async function addMergeFields(dir, fields) {
+    // fields: [[name, source file]]
+    const path = dir + "_merge_fields.yml";
+    let existing = null;
+    try {
+      existing = await api("/api/file?path=" + encodeURIComponent(path));
+    } catch (error) {
+      if (error.status !== 404) throw error;
+    }
+    const known = new Set(
+      [...(existing?.content ?? "").matchAll(/^([\w]+)\s*:/gm)].map((m) => m[1]),
+    );
+    const missing = fields.filter(([name]) => !known.has(name));
+    if (!missing.length) return { added: 0, created: false };
+    const lines = missing.map(([name, source]) => `${name}: Imported from ${source}\n`).join("");
+    if (existing) {
+      await api("/api/file", {
+        method: "PUT",
+        body: JSON.stringify({
+          path,
+          content: existing.content.replace(/\n*$/, "\n") + lines,
+          revision: existing.revision,
+        }),
+      });
+    } else {
+      await api("/api/files/action", {
+        method: "POST",
+        body: JSON.stringify({ action: "new", path, content: lines }),
+      });
+    }
+    return { added: missing.length, created: !existing };
+  }
+  async function importFiles(files, folder = targetDir()) {
+    const useImages = importOption("images");
+    const useFrontmatter = importOption("frontmatter");
+    const useFields = importOption("fields");
+    const taken = importTaken();
+    const created = []; // everything written, for Undo
+    const done = [];
+    const failed = [];
+    const fieldsByDir = new Map();
+    if (files.length > 1) toast(`Importing ${files.length} files…`);
+    for (const file of files) {
+      try {
+        const result = await convertForImport(file);
+        const wanted = `${folder}${importStem(file.name)}.md`;
+        const path = freeImportPath(wanted, taken);
+        taken.add(path);
+        let markdown = result.markdown;
+        markdown = useImages
+          ? await storeImportedImages(markdown, result.images, folder, importStem(file.name), created)
+          : stripImportImages(markdown);
+        if (useFrontmatter) markdown = result.frontmatter + markdown;
+        await api("/api/files/action", {
+          method: "POST",
+          body: JSON.stringify({ action: "new", path, content: markdown.trimEnd() + "\n" }),
+        });
+        created.push(path);
+        done.push({ path, renamed: path !== wanted });
+        const entry = fieldsByDir.get(folder) ?? new Map();
+        result.fields.forEach((name) => entry.has(name) || entry.set(name, file.name));
+        fieldsByDir.set(folder, entry);
+      } catch (error) {
+        failed.push(error.message);
+      }
+    }
+    let added = 0;
+    if (useFields && done.length) {
+      for (const [dir, entry] of fieldsByDir) {
+        if (!entry.size) continue;
+        const result = await addMergeFields(dir, [...entry]);
+        added += result.added;
+        if (result.created) created.push(dir + "_merge_fields.yml");
+      }
+    }
+    await loadTree();
+    if (done.length) await openFile(done[0].path);
+    if (done.length) {
+      const renamed = done.filter((item) => item.renamed);
+      toast(
+        (done.length === 1 ? "Imported " + done[0].path : `Imported ${done.length} documents`) +
+          (renamed.length ? ` (${renamed.length} renamed: name was taken)` : "") +
+          (added ? ` · ${added} merge field${added === 1 ? "" : "s"} added` : ""),
+        false,
+        { label: "Undo", run: () => undoImport(created) },
+      );
+    }
+    if (failed.length) toast(failed.join("; "), true);
+  }
+  // Moves everything an import wrote to the trash (recoverable from .editor-trash).
+  async function undoImport(created) {
+    if (created.some((path) => state.buffers.has(path) && dirty(state.buffers.get(path)))) {
+      toast("Save or close the imported documents before undoing.", true);
+      return;
+    }
+    for (const path of created) {
+      try {
+        await api("/api/files/action", { method: "POST", body: JSON.stringify({ action: "trash", path }) });
+        if (state.buffers.has(path)) await closeFile(path);
+      } catch {
+        /* already gone */
+      }
+    }
+    await loadTree();
+    toast("Import undone");
+  }
+  // Inserts the converted Markdown at the cursor of the open document.
+  async function importIntoDocument(files) {
+    if (current()?.type !== "md") throw new Error("Open a Markdown document to import into.");
+    const dir = importDirOf(state.active);
+    const useImages = importOption("images");
+    const parts = [];
+    const failed = [];
+    const fields = new Map();
+    const created = [];
+    for (const file of files) {
+      try {
+        const result = await convertForImport(file);
+        parts.push(
+          (useImages
+            ? await storeImportedImages(result.markdown, result.images, dir, importStem(file.name), created)
+            : stripImportImages(result.markdown)
+          ).trim(),
+        );
+        result.fields.forEach((name) => fields.has(name) || fields.set(name, file.name));
+      } catch (error) {
+        failed.push(error.message);
+      }
+    }
+    if (parts.length) {
+      if (state.mode === "write") setEditMode("source");
+      state.editor.executeEdits("import", [
+        {
+          range: state.editor.getSelection(),
+          text: parts.join("\n\n") + "\n",
+          forceMoveMarkers: true,
+        },
+      ]);
+      state.editor.focus();
+      let added = 0;
+      if (importOption("fields") && fields.size) added = (await addMergeFields(dir, [...fields])).added;
+      if (created.length || added) await loadTree();
+      toast(
+        "Imported at the cursor (Ctrl Z undoes it)" +
+          (added ? ` · ${added} merge field${added === 1 ? "" : "s"} added` : ""),
+      );
+    }
+    if (failed.length) toast(failed.join("; "), true);
+  }
+  // Drop files on a folder in the tree to import there, or on the editor to insert.
+  function wireImportDrop() {
+    const hasFiles = (event) => event.dataTransfer?.types.includes("Files");
+    const clearDrop = () =>
+      document.querySelectorAll(".drop-target").forEach((n) => n.classList.remove("drop-target"));
+    const sidebar = $("sidebar");
+    sidebar.addEventListener("dragover", (event) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      clearDrop();
+      event.target.closest("summary[data-folder]")?.classList.add("drop-target");
+    });
+    sidebar.addEventListener("dragleave", (event) => {
+      if (!sidebar.contains(event.relatedTarget)) clearDrop();
+    });
+    sidebar.addEventListener("drop", (event) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      clearDrop();
+      const folder = event.target.closest("summary[data-folder]")?.dataset.folder;
+      const file = event.target.closest("button.tree-file")?.dataset.path;
+      const dir = folder != null ? (folder ? folder + "/" : "") : file ? importDirOf(file) : targetDir();
+      importFiles([...event.dataTransfer.files], dir).catch((error) => toast(error.message, true));
+    });
+    const editor = $("md-doc-monaco");
+    editor.addEventListener("dragover", (event) => hasFiles(event) && event.preventDefault(), true);
+    editor.addEventListener(
+      "drop",
+      (event) => {
+        if (!hasFiles(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        importIntoDocument([...event.dataTransfer.files]).catch((error) => toast(error.message, true));
+      },
+      true,
+    );
+  }
+  function fileActions(path = state.active, anchor = menuAnchor()) {
+    const entries = [];
+    if (path)
       for (const [action, label, description, iconName] of [
         ["rename", "Rename", "Change the name in this folder", "edit"],
         ["move", "Move to…", "Choose a destination folder", "folder"],
         ["duplicate", "Duplicate", "Make a separate copy of this file", "copy"],
-        [
-          "trash",
-          "Move to trash",
-          "Recoverable from the confirmation toast",
-          "trash",
-        ],
+        ["trash", "Move to trash", "Recoverable from the confirmation toast", "trash"],
       ])
-        body.append(
-          option(label, description, iconName, () => fileAction(action, path)),
-        );
-    }
-    body.append(
-      option(
-        "New folder",
-        "Create a folder with inherited settings",
-        "folder",
-        () => {
-          dialog(
-            "Create a folder",
-            `<label for="folder-path">Folder path</label><input class="input" id="folder-path" placeholder="clients/new-client">`,
-            [
-              { label: "Cancel", run: (d) => d.close() },
-              {
-                label: "Create folder",
-                primary: true,
-                run: async (d) => {
-                  await api("/api/files/action", {
-                    method: "POST",
-                    body: JSON.stringify({
-                      action: "folder",
-                      path: $("folder-path").value.trim(),
-                    }),
-                  });
-                  d.close();
-                  await loadTree();
-                },
-              },
-            ],
-          );
-        },
-      ),
-    );
-    dialog("File actions", body);
+        entries.push([label, description, iconName, () => fileAction(action, path)]);
+    entries.push([
+      "New folder",
+      "Create a folder with inherited settings",
+      "folder",
+      () => newFolderDialog(),
+    ]);
+    popupMenu(anchor, "File actions", entries);
   }
   async function fileAction(action, path) {
     const move = action === "move";
@@ -2881,6 +3323,62 @@
       ],
     );
   }
+  function chartHost() {
+    return {
+      // The same ```chart block the presentation framework's Markdown slides take.
+      format: "yaml-fence",
+      scriptBase: "/static",
+      vendorBase: "/static/vendor/vega-6.2.0",
+      datasetBase: "/static/vendor/vega-6.2.0/datasets",
+      // Preview with this document's own theme colours and fonts.
+      getConfig: async () =>
+        api("/api/charts/config?path=" + encodeURIComponent(state.active)),
+      onInsert: (code) => insert("chart", "\n" + code),
+      getSource() {
+        if (state.editor) {
+          const model = state.editor.getModel();
+          return {
+            text: model.getValue(),
+            offset: model.getOffsetAt(state.editor.getPosition()),
+          };
+        }
+        return { text: state.fallback.value, offset: state.fallback.selectionStart };
+      },
+      replaceRange(start, end, code) {
+        if (state.editor) {
+          const model = state.editor.getModel();
+          const range = monaco.Range.fromPositions(
+            model.getPositionAt(start),
+            model.getPositionAt(end),
+          );
+          state.editor.executeEdits("studio-chart", [{ range, text: code }]);
+          state.editor.pushUndoStop();
+          state.editor.focus();
+        } else {
+          state.fallback.setRangeText(code, start, end, "end");
+          changed(state.fallback.value);
+        }
+      },
+      parseSpec: async (source) =>
+        (
+          await api("/api/charts/parse", {
+            method: "POST",
+            body: JSON.stringify({ source }),
+          })
+        ).spec,
+      notify: (message) => toast(message, true),
+    };
+  }
+  function chartWizard() {
+    if (!current()) return;
+    setEditMode("source");
+    window.ChartWizard.open(chartHost());
+  }
+  function editChart() {
+    if (!current()) return;
+    setEditMode("source");
+    window.ChartWizard.edit(chartHost());
+  }
   function insertionMenu() {
     const anchor = document.querySelector('[data-action="insert-menu"]');
     const existing = $("insert-submenu");
@@ -2915,6 +3413,22 @@
       ["slide", "Slide layout", "Two-column slide directive", "columns"],
     ])
       body.append(option(label, description, iconName, () => insert(kind)));
+    body.append(
+      option(
+        "Chart…",
+        "Build a Vega-Lite chart step by step (bar, line, pie, scatter, heatmap…)",
+        "columns",
+        chartWizard,
+      ),
+    );
+    body.append(
+      option(
+        "Edit chart at cursor",
+        "Reopen the wizard on the chart block the cursor is in",
+        "columns",
+        editChart,
+      ),
+    );
     body.append(
       option(
         "Merge field",
@@ -3058,7 +3572,7 @@
   function settings() {
     dialog(
       "Studio settings",
-      `<p>Preferences are saved for this workspace on this browser.</p><label for="settings-appearance">Appearance</label><select class="input" id="settings-appearance"><option value="system">Use system setting</option><option value="light">Light</option><option value="dark">Dark</option></select><label for="settings-refresh">Preview updates</label><select class="input" id="settings-refresh"><option value="auto">Automatic after typing pauses</option><option value="manual">Manual refresh</option></select><label for="settings-delay">Preview delay after typing</label><select class="input" id="settings-delay"><option value="1500">1.5 seconds</option><option value="3000">3 seconds</option><option value="5000">5 seconds</option></select><label for="settings-page">PDF reading layout</label><select class="input" id="settings-page"><option value="continuous">Continuous pages</option><option value="single">Single page</option></select><label for="settings-forms">PDF form test mode</label><select class="input" id="settings-forms"><option value="off">Off — show exported appearance</option><option value="on">On — fill fields for testing</option></select><p style="margin-top:15px">Form test values do not change document defaults or downloaded artifacts.</p>`,
+      `<p>Preferences are saved for this workspace on this browser.</p><label for="settings-appearance">Appearance</label><select class="input" id="settings-appearance"><option value="system">Use system setting</option><option value="light">Light</option><option value="dark">Dark</option></select><label for="settings-refresh">Preview updates</label><select class="input" id="settings-refresh"><option value="auto">Automatic after typing pauses</option><option value="manual">Manual refresh</option></select><label for="settings-delay">Preview delay after typing</label><select class="input" id="settings-delay"><option value="1500">1.5 seconds</option><option value="3000">3 seconds</option><option value="5000">5 seconds</option></select><label for="settings-page">PDF reading layout</label><select class="input" id="settings-page"><option value="continuous">Continuous pages</option><option value="single">Single page</option></select><label for="settings-forms">PDF form test mode</label><select class="input" id="settings-forms"><option value="off">Off — show exported appearance</option><option value="on">On — fill fields for testing</option></select><p style="margin-top:15px">Form test values do not change document defaults or downloaded artifacts.</p><p><strong>When importing documents</strong></p><label><input type="checkbox" id="settings-import-frontmatter"> Add starter frontmatter (title, output name, formats)</label><br><label><input type="checkbox" id="settings-import-images"> Save embedded images to an assets folder</label><br><label><input type="checkbox" id="settings-import-fields"> Add merge fields to _merge_fields.yml</label>`,
       [
         {
           label: "Done",
@@ -3068,6 +3582,8 @@
             state.auto = $("settings-refresh").value === "auto";
             state.previewDelay = Number($("settings-delay").value);
             store("previewDelay", state.previewDelay);
+            for (const name of ["frontmatter", "images", "fields"])
+              store("import-" + name, $("settings-import-" + name).checked);
             $("auto-preview").checked = state.auto;
             store("auto", state.auto);
             applyAppearance();
@@ -3083,6 +3599,8 @@
     $("settings-appearance").value = state.appearance;
     $("settings-refresh").value = state.auto ? "auto" : "manual";
     $("settings-delay").value = String(state.previewDelay);
+    for (const name of ["frontmatter", "images", "fields"])
+      $("settings-import-" + name).checked = importOption(name);
   }
   function help() {
     dialog(
@@ -3101,7 +3619,9 @@
     },
     help,
     export: exportMenu,
-    new: newDocument,
+    new: () => newDocumentMenu(),
+    import: () => chooseImportFiles((files) => importFiles(files)),
+    "import-insert": () => chooseImportFiles(importIntoDocument),
     "file-actions": () => fileActions(),
     "refresh-tree": () => loadTree(),
     "root-toggle": () => {
@@ -3110,6 +3630,7 @@
     },
     "expand-folders": () => {
       store("rootCollapsed", false);
+      store("treeSections", {});
       const paths = [];
       const walk = (nodes) =>
         nodes.forEach((node) => {
@@ -3248,6 +3769,8 @@
         : "Files · type > for commands";
     const commandList = [
       ["Create document", "new", "Ctrl N"],
+      ["Import documents", "import", ""],
+      ["Import into this document", "import-insert", ""],
       ["Export document", "export", ""],
       ["Change layout", "layout", ""],
       ["Refresh preview", "refresh-preview", ""],
@@ -3256,6 +3779,7 @@
       ["Save document", "save", "Ctrl S"],
       ["Focus mode", "focus", ""],
       ["Studio settings", "settings", ""],
+      ["Find repeated text", "shared", ""],
       ["Source control", "git", ""],
       ["Insert form or diagram", "insert-menu", ""],
     ];
@@ -3271,11 +3795,12 @@
           shortcut,
           score,
           run: () =>
-            action === "save"
+            (state.lastActionEl = null) ||
+            (action === "save"
               ? save()
-              : action === "git"
-                ? nav("git")
-                : actions[action](),
+              : action === "git" || action === "shared"
+                ? nav(action)
+                : actions[action]()),
         });
       }
     } else {
@@ -3369,6 +3894,421 @@
     } catch (error) {
       toast(error.message, true);
     }
+  }
+  // ── Shared content: find repeated text and move it into a template ───────
+  const shared = {
+    scope: "workspace",
+    minDocs: 2,
+    minChars: 80,
+    result: null,
+    busy: false,
+    error: "",
+    hiddenOpen: false,
+  };
+  function sharedFolder() {
+    const index = (state.active || "").lastIndexOf("/");
+    return index > 0 ? state.active.slice(0, index) : "";
+  }
+  function sharedScanPath() {
+    return shared.scope === "folder" ? sharedFolder() : "";
+  }
+  function openShared() {
+    if (!shared.result && !shared.busy) scanShared();
+    else renderShared();
+  }
+  async function scanShared() {
+    shared.busy = true;
+    shared.error = "";
+    renderShared();
+    try {
+      const query = new URLSearchParams({
+        path: sharedScanPath(),
+        min_docs: shared.minDocs,
+        min_chars: shared.minChars,
+      });
+      shared.result = await api("/api/refactor/scan?" + query);
+    } catch (error) {
+      shared.error = error.message;
+    } finally {
+      shared.busy = false;
+      renderShared();
+    }
+  }
+  function renderShared() {
+    const container = $("shared-panel");
+    container.replaceChildren();
+    container.append(
+      el(
+        "p",
+        "inspector-note",
+        "Find text that appears word for word in several documents and move it into one shared template.",
+      ),
+    );
+    const scope = el("select", "input");
+    scope.setAttribute("aria-label", "Where to look");
+    const folder = sharedFolder();
+    scope.append(new Option("Whole workspace", "workspace"));
+    if (folder) scope.append(new Option("Folder: " + folder, "folder"));
+    scope.value = shared.scope === "folder" && folder ? "folder" : "workspace";
+    shared.scope = scope.value;
+    scope.onchange = () => {
+      shared.scope = scope.value;
+      shared.result = null;
+      scanShared();
+    };
+    container.append(el("label", "field-label", "LOOK IN"), scope);
+    const advanced = el("details", "shared-advanced");
+    advanced.append(el("summary", null, "Sensitivity"));
+    const row = el("div", "shared-sensitivity");
+    for (const [key, label, min, max] of [
+      ["minDocs", "Documents at least", 2, 100],
+      ["minChars", "Characters at least", 10, 10000],
+    ]) {
+      const wrap = el("label", null, label);
+      const input = el("input", "input");
+      input.type = "number";
+      input.min = min;
+      input.max = max;
+      input.value = shared[key];
+      input.onchange = () => {
+        shared[key] = Math.min(max, Math.max(min, Number(input.value) || min));
+        input.value = shared[key];
+        scanShared();
+      };
+      wrap.append(input);
+      row.append(wrap);
+    }
+    advanced.append(row);
+    container.append(advanced);
+    const rescan = el(
+      "button",
+      "button wide",
+      shared.busy ? "Scanning…" : "Scan again",
+    );
+    rescan.disabled = shared.busy;
+    rescan.onclick = () => scanShared();
+    container.append(rescan);
+    if (shared.error) {
+      container.append(el("p", "shared-error", shared.error));
+      return;
+    }
+    if (!shared.result) return;
+    const { groups, scanned } = shared.result;
+    const visible = groups.filter((g) => !g.ignored);
+    const matches = visible.filter((g) => g.existing);
+    const repeated = visible.filter((g) => !g.existing);
+    const hidden = groups.filter((g) => g.ignored);
+    const heading = (label) => container.append(el("label", "field-label", label));
+    if (!visible.length)
+      container.append(
+        el(
+          "label",
+          "field-label",
+          `NOTHING NEW · ${scanned} DOCUMENTS`,
+        ),
+        el(
+          "p",
+          "inspector-note",
+          "No text repeats across documents or duplicates an existing template. Lower the sensitivity to catch shorter passages. Text that differs by a name or date is not matched until the varying part is a {{ variable }}.",
+        ),
+      );
+    if (matches.length) {
+      heading(
+        `MATCHES AN EXISTING TEMPLATE · ${matches.length}`,
+      );
+      for (const group of matches) container.append(sharedCard(group));
+    }
+    if (repeated.length) {
+      heading(
+        `REPEATED TEXT · ${repeated.length} · ${scanned} DOCUMENTS`,
+      );
+      for (const group of repeated) container.append(sharedCard(group));
+    }
+    if (hidden.length) {
+      const details = el("details", "shared-hidden");
+      details.open = shared.hiddenOpen;
+      details.ontoggle = () => (shared.hiddenOpen = details.open);
+      details.append(el("summary", null, `Hidden · ${hidden.length}`));
+      for (const group of hidden) {
+        const row = el("div", "shared-hidden-row");
+        const label = el("div");
+        label.append(
+          el("strong", null, group.name),
+          el(
+            "small",
+            null,
+            group.existing
+              ? `existing template · ${group.copies} copies`
+              : `${group.copies} copies`,
+          ),
+        );
+        const review = el("button", "text-button", "Review");
+        review.onclick = () => reviewShared(group);
+        const restore = el("button", "text-button", "Restore");
+        restore.onclick = () => hideShared(group, false);
+        row.append(label, review, restore);
+        details.append(row);
+      }
+      container.append(details);
+    }
+  }
+  async function hideShared(group, hide) {
+    await api("/api/refactor/ignore", {
+      method: "POST",
+      body: JSON.stringify({
+        path: sharedScanPath(),
+        key: group.key,
+        ignored: hide,
+        name: group.name,
+      }),
+    });
+    group.ignored = hide;
+    renderShared();
+    if (hide)
+      toast(`Hidden “${group.name}”. Restore it from the Hidden list below.`, false, {
+        label: "Undo",
+        run: () => hideShared(group, false).catch((e) => toast(e.message, true)),
+      });
+  }
+  function sharedCard(group) {
+    const card = el("div", "shared-card");
+    const head = el("div", "shared-card-head");
+    head.append(
+      el("strong", null, group.name),
+      el(
+        "span",
+        "shared-badge" + (group.existing ? " existing" : ""),
+        group.existing ? "existing template" : `${group.copies} copies`,
+      ),
+    );
+    const documents = new Set(group.occurrences.map((o) => o.path)).size;
+    card.append(
+      head,
+      el(
+        "p",
+        "shared-meta",
+        group.existing
+          ? `Same text as ${group.target} · found in ${documents} document${documents === 1 ? "" : "s"}`
+          : `${documents} documents · ${group.lines} lines`,
+      ),
+      el("pre", "shared-preview", group.preview),
+    );
+    const actions = el("div", "shared-card-actions");
+    const review = el(
+      "button",
+      "button primary",
+      group.existing ? "Review and replace…" : "Review and extract…",
+    );
+    review.onclick = () => reviewShared(group);
+    const hide = el("button", "button", "Hide");
+    hide.title = "Don't show this match again";
+    hide.onclick = () => hideShared(group, true).catch((e) => toast(e.message, true));
+    actions.append(review, hide);
+    card.append(actions);
+    return card;
+  }
+  function reviewShared(group) {
+    const body = el("div", "shared-review");
+    body.append(
+      el(
+        "p",
+        null,
+        group.existing
+          ? "This text is already a template. Replace each copy with an include of it; the rendered output stays the same."
+          : "This text appears in several documents. Choose where to replace it with an include of one shared template.",
+      ),
+    );
+    const nameInput = el("input", "input");
+    nameInput.value = group.name;
+    nameInput.setAttribute("aria-label", "Template name");
+    const nameRow = el("div", "shared-name-row");
+    nameRow.append(nameInput, el("span", null, ".md"));
+    // An include only resolves from a templates/ folder in the documents' closest
+    // shared folder or above it, so those are the choices (closest first).
+    const place = el("select", "input");
+    place.setAttribute("aria-label", "Template location");
+    let placeTouched = false;
+    const syncPlace = (paths) => {
+      const dirs = paths.map((p) => p.split("/").slice(0, -1));
+      let common = dirs[0] || [];
+      for (const d of dirs) {
+        const mismatch = common.findIndex((part, i) => d[i] !== part);
+        if (mismatch >= 0) common = common.slice(0, mismatch);
+      }
+      const previous = place.value;
+      place.replaceChildren();
+      for (let depth = common.length; depth >= 0; depth--) {
+        const folder = [...common.slice(0, depth), "templates"].join("/");
+        const label =
+          (depth === common.length
+            ? "Next to the documents"
+            : depth === 0
+              ? "Workspace root"
+              : "Shared parent folder") +
+          " · " +
+          folder +
+          "/";
+        place.append(new Option(label, folder));
+      }
+      place.value =
+        placeTouched && [...place.options].some((o) => o.value === previous)
+          ? previous
+          : place.options[0]?.value;
+    };
+    const where = el("p", "shared-where");
+    const syncWhere = () => {
+      where.textContent =
+        "Saved as " + place.value + "/" + nameInput.value.trim() + ".md";
+    };
+    nameInput.oninput = syncWhere;
+    place.onchange = () => {
+      placeTouched = true;
+      syncWhere();
+    };
+    if (group.existing)
+      body.append(
+        el("label", null, "Existing template"),
+        el("p", "shared-where", group.target),
+      );
+    else
+      body.append(
+        el("label", null, "Template name"),
+        nameRow,
+        el("label", null, "Location"),
+        place,
+        where,
+      );
+    body.append(el("label", null, "Shared text"));
+    body.append(el("pre", "shared-text", group.text));
+    body.append(el("label", null, "Replace in"));
+    const list = el("div", "shared-docs");
+    const boxes = [];
+    const update = () => {
+      const count = boxes.filter((box) => box.checked).length;
+      const button = $("dialog-actions").lastElementChild;
+      button.disabled = count < (group.existing ? 1 : 2);
+      button.textContent = `${group.existing ? "Replace in" : "Extract from"} ${count} document${count === 1 ? "" : "s"}`;
+      const picked = boxes.filter((box) => box.checked).map((box) => box.dataset.path);
+      if (picked.length && !group.existing) {
+        syncPlace(picked);
+        syncWhere();
+      }
+    };
+    for (const occurrence of group.occurrences) {
+      const buffer = state.buffers.get(occurrence.path);
+      const unsaved = buffer && dirty(buffer);
+      const row = el("div", "shared-doc");
+      const label = el("label");
+      const box = el("input");
+      box.type = "checkbox";
+      box.checked = !unsaved;
+      box.disabled = Boolean(unsaved);
+      box.dataset.path = occurrence.path;
+      box.onchange = update;
+      boxes.push(box);
+      label.append(
+        box,
+        el("span", null, occurrence.path),
+        el(
+          "small",
+          null,
+          unsaved
+            ? "unsaved changes — save first"
+            : `lines ${occurrence.line}–${occurrence.endLine}`,
+        ),
+      );
+      const open = el("button", "text-button", "Open");
+      open.type = "button";
+      open.onclick = () => {
+        $("form-dialog").close();
+        openFile(occurrence.path, occurrence.line);
+      };
+      row.append(label, open);
+      list.append(row);
+    }
+    body.append(list);
+    body.append(
+      el(
+        "p",
+        "shared-note",
+        'Each copy becomes {% include "name.md" %}. Every document is rendered before and after, and nothing is written if any output would change. Earlier versions stay in each folder’s .editor-history.',
+      ),
+    );
+    dialog(
+      group.existing ? "Replace with existing template" : "Extract shared text",
+      body,
+      [
+        { label: "Cancel", run: (node) => node.close() },
+        {
+          label: "Extract",
+          primary: true,
+          run: async (node) => {
+            const chosen = group.occurrences.filter((o) =>
+              boxes.some((box) => box.checked && box.dataset.path === o.path),
+            );
+            const blocked = chosen.find((o) => {
+              const buffer = state.buffers.get(o.path);
+              return buffer && dirty(buffer);
+            });
+            if (blocked)
+              throw new Error("Save or discard changes in " + blocked.path);
+            const result = await api("/api/refactor/apply", {
+              method: "POST",
+              body: JSON.stringify({
+                path: sharedScanPath(),
+                min_docs: shared.minDocs,
+                min_chars: shared.minChars,
+                key: group.key,
+                name: group.existing ? "" : nameInput.value,
+                folder: group.existing ? undefined : place.value,
+                documents: chosen.map((o) => o.path),
+                revisions: Object.fromEntries(
+                  chosen.map((o) => [o.path, o.revision]),
+                ),
+              }),
+            });
+            node.close();
+            await finishShared(result);
+          },
+        },
+      ],
+      true,
+    );
+    update();
+  }
+  async function reloadBuffer(buffer) {
+    const data = await api("/api/file?path=" + encodeURIComponent(buffer.path));
+    buffer.content = buffer.saved = data.content;
+    buffer.revision = data.revision;
+    buffer.edited = false;
+    if (buffer.model) {
+      state.switching = true;
+      try {
+        buffer.model.setValue(data.content);
+      } finally {
+        state.switching = false;
+      }
+    }
+    if (state.active === buffer.path) {
+      if (!buffer.model && state.fallback) state.fallback.value = data.content;
+      schedulePreview(0);
+    }
+  }
+  async function finishShared(result) {
+    for (const change of result.changed) {
+      const buffer = state.buffers.get(change.path);
+      if (buffer) await reloadBuffer(buffer);
+    }
+    persist();
+    await loadTree();
+    toast(
+      result.existing
+        ? `Linked ${result.changed.length} document${result.changed.length === 1 ? "" : "s"} to ${result.template}`
+        : `Moved the text into ${result.template} and linked ${result.changed.length} documents`,
+      false,
+      { label: "Open template", run: () => openFile(result.template) },
+    );
+    scanShared();
   }
   async function loadGit() {
     const data = await api("/api/git/status");
@@ -3630,10 +4570,12 @@
       }
     };
     splitters();
+    wireImportDrop();
     document.addEventListener("click", (event) => {
       const action = event.target.closest("[data-action]");
       if (action) {
         const fn = actions[action.dataset.action];
+        state.lastActionEl = action;
         if (fn)
           Promise.resolve()
             .then(fn)

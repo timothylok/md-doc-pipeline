@@ -258,6 +258,23 @@ def _set_image_cache(enabled: bool) -> None:
     pdf_builder.use_shared_image_cache(enabled)
 
 
+def _review_variants(config: dict[str, Any]) -> list[tuple[str, str | None]]:
+    """``(file-name suffix, review_markup mode)`` per ``review_exports`` variant.
+
+    Without ``review_exports`` there is one plain build: ``("", None)``.
+    """
+    from .critic import VARIANTS
+
+    raw = config.get("review_exports")
+    names = raw if isinstance(raw, list) else [raw] if raw else []
+    variants: list[tuple[str, str | None]] = []
+    for name in names:
+        entry = VARIANTS.get(str(name).strip().lower())
+        if entry is not None and (entry[1], entry[0]) not in [(s, m) for s, m in variants]:
+            variants.append((entry[1], entry[0]))
+    return variants or [("", None)]
+
+
 def _build_document(
     doc_path: Path,
     *,
@@ -269,6 +286,7 @@ def _build_document(
     strict: bool,
     force: bool,
     verbose: bool,
+    review: str | None = None,
 ) -> dict[str, Any]:
     """Build one document to all its formats. Pure/worker-safe: returns a result
     dict (no console I/O) so it can run in a process pool.
@@ -286,6 +304,9 @@ def _build_document(
     config = _render_config_strings(config)
     if theme is not None:
         config["pdf_theme"] = str(theme.resolve())
+    if review is not None:
+        config["review_markup"] = review
+        config.pop("review_exports", None)  # an explicit --review is a single build
 
     formats = get_output_formats(config) if fmt == "all" else [fmt]
 
@@ -308,8 +329,9 @@ def _build_document(
     from .dependencies import signature
 
     dependency_signature = "" if force else signature(cascade_root, config, theme_dep)
-    stale: list[tuple[str, Path]] = []
-    for format_name in formats:
+    stale: list[tuple[str, Path, str | None]] = []
+    variants = _review_variants(config)
+    for format_name, (suffix, review_mode) in [(f, v) for f in formats for v in variants]:
         ext = (
             "-form.pdf" if (format_name == "pdf" and config.get("pdf_forms")) else f".{format_name}"
         )
@@ -320,6 +342,8 @@ def _build_document(
             events.append(("error", f"output_filename render failed: {type(exc).__name__}: {exc}"))
             errored = True
             continue
+        if suffix:  # one file per review_exports variant: report-clean.pdf, report-markup.pdf …
+            out_path = out_path.with_name(out_path.name[: -len(ext)] + suffix + ext)
         state_path = out_path.with_name("." + out_path.name + ".md-doc-state")
         same_inputs = False
         if not force:
@@ -336,7 +360,7 @@ def _build_document(
             events.append(("skip", f"up to date {out_path.name}"))
             skipped += 1
         else:
-            stale.append((format_name, out_path))
+            stale.append((format_name, out_path, review_mode))
 
     if not stale:
         return {
@@ -366,25 +390,34 @@ def _build_document(
             "errored": True,
         }
 
-    for format_name, out_path in stale:
+    for format_name, out_path, review_mode in stale:
         out_path.parent.mkdir(parents=True, exist_ok=True)
+        build_config = {**config, "review_markup": review_mode} if review_mode else config
         try:
             if format_name == "pdf":
                 from .builders.pdf import build as build_pdf  # type: ignore[import]
 
-                build_pdf(rendered_md, config, out_path, doc_path=doc_path, repo_root=cascade_root)
+                build_pdf(
+                    rendered_md, build_config, out_path, doc_path=doc_path, repo_root=cascade_root
+                )
             elif format_name == "docx":
                 from .builders.docx import build as build_docx  # type: ignore[import]
 
-                build_docx(rendered_md, config, out_path, doc_path=doc_path, repo_root=cascade_root)
+                build_docx(
+                    rendered_md, build_config, out_path, doc_path=doc_path, repo_root=cascade_root
+                )
             elif format_name == "dotx":
                 from .builders.dotx import build as build_dotx  # type: ignore[import]
 
-                build_dotx(rendered_md, config, out_path, doc_path=doc_path, repo_root=cascade_root)
+                build_dotx(
+                    rendered_md, build_config, out_path, doc_path=doc_path, repo_root=cascade_root
+                )
             elif format_name == "pptx":
                 from .builders.pptx import build as build_pptx  # type: ignore[import]
 
-                build_pptx(rendered_md, config, out_path, doc_path=doc_path, repo_root=cascade_root)
+                build_pptx(
+                    rendered_md, build_config, out_path, doc_path=doc_path, repo_root=cascade_root
+                )
             else:
                 events.append(("warn", f"unknown format '{format_name}' — skipped"))
                 continue
@@ -730,6 +763,11 @@ def doctor() -> None:
             "Mermaid diagrams in Word  [mermaid]",
             "install the [mermaid] extra (README › Installation) — without it, diagrams fall back to code blocks in .docx/.dotx",
         ),
+        (
+            "vl_convert",
+            "Vega-Lite charts  [charts]",
+            "install the [charts] extra (README › Installation) — without it, chart blocks stay as code",
+        ),
     ):
         try:
             __import__(module)
@@ -805,6 +843,19 @@ def doctor() -> None:
     ),
 )
 @click.option(
+    "--review",
+    default=None,
+    type=click.Choice(["accept", "reject", "show", "simple", "hybrid"], case_sensitive=False),
+    help=(
+        "What to do with CriticMarkup review marks ({++add++}, {--delete--}, {~~old~>new~~}, "
+        "{==highlight==}{>>comment<<}): accept or reject every change, show them (PDF "
+        "colours, Word tracked changes and comments), simple (final text with change bars, "
+        "highlights and comments), or hybrid (final text with a light highlight and bars, "
+        "the changes and comments written out in a margin column). "
+        "Overrides 'review_markup' and 'review_exports' for this build. Default: accept."
+    ),
+)
+@click.option(
     "--jobs",
     "-j",
     default=1,
@@ -824,6 +875,7 @@ def build(
     no_lint: bool,
     dry_run: bool,
     force: bool,
+    review: str | None,
     jobs: int,
     verbose: bool,
 ) -> None:
@@ -943,6 +995,7 @@ def build(
             strict=strict,
             force=force,
             verbose=verbose,
+            review=review.lower() if review else None,
         )
 
     built_total = 0
@@ -979,6 +1032,7 @@ def build(
                         strict=strict,
                         force=force,
                         verbose=verbose,
+                        review=review.lower() if review else None,
                     )
                     for d in docs
                 ]
@@ -1636,6 +1690,110 @@ def fields(directory: Path, workspace: str | None) -> None:
 
 
 # ---------------------------------------------------------------------------
+# refactor
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.argument(
+    "directory", default=".", type=click.Path(exists=True, file_okay=False, path_type=Path)
+)
+@click.option(
+    "--workspace",
+    "-w",
+    default=None,
+    help="Scan a named remote workspace from workspace/remote-workspaces.yml.",
+)
+@click.option(
+    "--min-docs",
+    default=2,
+    show_default=True,
+    help="Only report text found in this many documents.",
+)
+@click.option(
+    "--min-chars", default=80, show_default=True, help="Ignore shared text shorter than this."
+)
+@click.option(
+    "--templates-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help="Write fragments here instead of a templates/ folder next to the shared documents.",
+)
+@click.option(
+    "--apply",
+    "apply_changes",
+    is_flag=True,
+    help="Write the fragments and replace the repeated text with {% include %} lines.",
+)
+def refactor(
+    directory: Path,
+    workspace: str | None,
+    min_docs: int,
+    min_chars: int,
+    templates_dir: Path | None,
+    apply_changes: bool,
+) -> None:
+    """Find text repeated across documents and move it to a template.
+
+    Reports sections (paragraphs, lists, tables, ...) that appear verbatim in
+    several documents under DIRECTORY, and text that duplicates a template that
+    already exists. Without --apply nothing is changed. With --apply each new
+    section is saved as a fragment in a templates/ folder and
+    replaced by an {% include %}; the documents are re-rendered first and last
+    and everything is rolled back if the output would differ.
+
+    \b
+    Examples:
+      md-doc refactor workspace/acme/
+      md-doc refactor workspace/acme/ --min-docs 3 --apply
+    """
+    from .refactor import apply_groups, find_shared_sections
+
+    if workspace is not None:
+        directory = _resolve_workspace_root(workspace, directory, _find_repo_root(Path.cwd()))
+    directory = Path(directory).resolve()
+    repo_root = _find_repo_root(directory)
+
+    groups = find_shared_sections(directory, min_docs, min_chars, templates_dir)
+    if not groups:
+        click.echo(_dim("No repeated sections found."))
+        return
+
+    def rel(p: Path) -> str:
+        try:
+            return str(p.relative_to(repo_root))
+        except ValueError:
+            return str(p)
+
+    for g in groups:
+        copies = len(g.occurrences)
+        kind = "matches existing template" if g.existing else f"{copies} copies"
+        click.echo(f"\n{_bold(g.name)}  —  {kind} in {len(g.docs)} documents, {g.chars} characters")
+        preview = [ln for ln in g.text.splitlines() if ln.strip()][:2]
+        for ln in preview:
+            click.echo(_dim(f"    {ln[:90]}"))
+        click.echo(f"  → {'uses ' if g.existing else ''}{rel(g.target)}")
+        for doc in g.docs:
+            click.echo(f"    {rel(doc)}")
+
+    if not apply_changes:
+        click.echo(_dim("\nDry run — re-run with --apply to create the templates."))
+        return
+
+    try:
+        written = apply_groups(groups, repo_root)
+    except Exception as exc:
+        raise click.ClickException(f"Refactor rolled back, no files changed: {exc}") from exc
+    updated = len({d for g in groups for d in g.docs})
+    click.echo(
+        _info(
+            f"\n{len(written)} new template(s), {updated} document(s) updated; "
+            "output of every document is unchanged."
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
 # new
 # ---------------------------------------------------------------------------
 
@@ -2002,21 +2160,25 @@ def theme_override(directory: Path, force: bool) -> None:
     help="Overwrite existing output file without prompting.",
 )
 def extract(file_path: str, dest: str, force: bool) -> None:
-    """Extract Markdown from a PDF or DOCX file.
+    """Extract Markdown from a Word, PowerPoint, Excel, HTML or PDF file.
 
-    Converts a PDF or DOCX file to Markdown and saves it to the specified destination.
+    Converts the file to Markdown and saves it to the specified destination.
     Output filename is derived from the source filename (with .md extension).
+    Merge fields and form fields in a .docx or .dotx come out as [[field]] and are listed.
+    Excel (.xlsx) needs the optional extra: uv sync --extra xlsx
 
     \b
     Examples:
         md-doc extract proposal.pdf --dest templates/
         md-doc extract contract.docx --dest snippets/
+        md-doc extract letter.dotx --dest templates/  # fields become [[field]]
         md-doc extract form.pdf  # defaults to templates/
     """
-    from md_doc.extractors import extract_file
+    from md_doc.extractors import extract_document
 
     try:
-        markdown_content = extract_file(file_path)
+        extraction = extract_document(file_path)
+        markdown_content = extraction.markdown
 
         source_path = Path(file_path)
         dest_path = Path(dest)
@@ -2031,6 +2193,8 @@ def extract(file_path: str, dest: str, force: bool) -> None:
         output_file.write_text(markdown_content or "", encoding="utf-8")
 
         click.echo(f"{_ok('✓')} Extracted: {_info(source_path.name)} → {_info(str(output_file))}")
+        if extraction.fields:
+            click.echo(f"  Fields: {', '.join(extraction.fields)}")
 
     except FileNotFoundError as e:
         click.echo(f"{_err('ERROR')} {e}", err=True)

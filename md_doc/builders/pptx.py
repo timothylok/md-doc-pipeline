@@ -48,6 +48,7 @@ from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.util import Emu, Inches, Pt
 
+from ..linebreaks import backslash_line_breaks
 from ..docx_theme import _hex_to_rgb, resolve_docx_theme
 from ._assets import (
     _EMU_PER_PX,
@@ -945,7 +946,9 @@ def build(
     if split not in ("h1", "h2", "marker"):
         split = "h2"
 
-    body = _strip_frontmatter(rendered_md)
+    from ..critic import prepare as prepare_review_markup
+
+    body = prepare_review_markup(_strip_frontmatter(rendered_md), config, "pptx")
     title = config.get("title") or _extract_title(body) or out_path.stem
     author = str(config.get("author", ""))
     date = str(config.get("date", ""))
@@ -958,7 +961,7 @@ def build(
     # as top-level comments (a directive glued to a paragraph would be inline).
     body = _BLOCK_COMMENT_RE.sub(lambda m: f"\n\n{m.group(0)}\n\n", body)
     body = _SLIDE_BREAK_RE.sub('\n\n<hr class="md-doc-slide-break">\n\n', body)
-    html = markdown.Markdown(extensions=_MD_EXTENSIONS).convert(body)
+    html = markdown.Markdown(extensions=_MD_EXTENSIONS).convert(backslash_line_breaks(body))
     html = _drop_empty_table_headers(html)
 
     # Theme (colours + fonts from the CSS cascade) + mermaid diagram theme.
@@ -966,15 +969,28 @@ def build(
     theme = theme or {}
     mermaid_theme = None
     try:
-        from .pdf import _resolve_css
-        from ..mermaid import extract_theme_from_css
+        from .pdf import _resolve_css, _resolve_logo
+        from ..docx_theme import _load_css_with_imports
+        from ..mermaid import diagram_theme
 
         css = _resolve_css(config, repo_root, doc_path=doc_path)
-        if css and css.exists():
-            mermaid_theme = extract_theme_from_css(css.read_text(encoding="utf-8"))
+        mermaid_theme = diagram_theme(
+            _load_css_with_imports(css) if css and css.exists() else None,
+            config,
+            lambda value: _resolve_logo(value, repo_root, doc_path),
+            column_px=880,
+        )
     except Exception:
         mermaid_theme = None
     html, images = _render_mermaid_to_images(html, mermaid_theme)
+    from ..charts import render_to_images as _render_charts_to_images
+
+    html = _render_charts_to_images(
+        html,
+        mermaid_theme,
+        images,
+        base_dir=(doc_path.parent if doc_path and doc_path.is_file() else doc_path),
+    )
 
     # Presentation base + slide size.
     template = (

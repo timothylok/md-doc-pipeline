@@ -16,17 +16,18 @@ Built for document-heavy workflows — proposals, project reports, compliance do
 ## Features
 
 - **Cascading `_meta.yml` config** — inherit settings from parent directories, override at any folder or document level
-- **Jinja2 renderer** — compose documents from reusable fragments with `{% include %}` and `{{ variable }}` substitution
+- **Jinja2 renderer** — compose documents from reusable fragments with `{% include %}` and `{{ variable }}` substitution, plus conditions, loops, macros and totals (`{% if %}`, `{% for %}`; [logic in templates](docs/handbook.md#markdown-logic-in-templates))
 - **Merge field support** — `[[field_name]]` in Markdown becomes a Word `«MERGEFIELD»` in `.dotx` output for downstream mail merge
 - **PDF output** — WeasyPrint builder with branded cover page, headers, footers, and pagination
 - **Print-grade PDF** — bookmarks, PDF/A, PDF/UA and PDF/X variants, embedded fonts, files and source, hyphenation, numbered headings, page-bottom footnotes, running chapter titles, columns and grids, facing pages with recto chapter starts, crop marks and bleed, and layout checks ([PDF features](docs/handbook.md#pdf-features))
+- **Review markup** — CriticMarkup (`{++add++}`, `{--delete--}`, `{~~old~>new~~}`, `{==highlight==}{>>comment<<}`) in the source; builds accept, reject or show it, with real Word tracked changes and comments, and `md-doc extract` brings Word edits back ([review markup](docs/handbook.md#markdown-review-markup))
 - **DOCX output** — python-docx builder for copy-to-email Word documents
 - **DOTX output** — Word merge template builder; your other application fills the fields
 - **PPTX output** — python-pptx slide builder with a deck-first authoring schema: headings segment into slides, plus layout directives for section dividers, multi-column bodies, big-number stat tiles, pull-quotes, image showcases, per-slide backgrounds, and speaker notes ([slides guide](docs/handbook.md#slides))
 - **Cascading themes** — `_pdf-theme.css`, shared `_theme.css` and Word-only `_docx-theme.css` at any folder level; deepest wins. `md-doc theme init` generates a full theme, `md-doc theme override` a colour-only override, and `--mddoc-*` custom properties set brand defaults in CSS ([theming guide](docs/handbook.md#themes))
 - **Fillable PDF forms** — `pdf_forms: true` with a `?[text: name]` shorthand, bordered `?[box]` grids, signatures and Yes/No pairs; the same source gives real Word form fields in `.dotx` ([forms guide](docs/handbook.md#forms))
 - **Diagrams and maths** — Mermaid flowcharts, charts, Gantt, sequence, mind map, ER and state diagrams, plus LaTeX equations, in PDF and Word ([Markdown reference](docs/handbook.md#markdown))
-- **Export and extract** — `md-doc export` builds only the notes marked `export: true` ([export guide](docs/handbook.md#exporting)); `md-doc extract` turns a PDF or DOCX back into Markdown ([extraction guide](docs/handbook.md#extracting))
+- **Export and extract** — `md-doc export` builds only the notes marked `export: true` ([export guide](docs/handbook.md#exporting)); `md-doc extract` turns Word, PowerPoint, Excel, HTML or PDF back into Markdown, keeping merge fields as `[[fields]]` ([extraction guide](docs/handbook.md#extracting))
 - **Editors** — a browser editor with live preview ([md-doc-web-editor](md-doc-web-editor/README.md), [Filament plugin](https://github.com/gregshallardau/filament-md-doc)) and a [Neovim plugin](nvim-plugin/README.md) that resolves includes and variables inline
 - **Merge field schema** — `_merge_fields.yml` at any level defines and documents available `[[fields]]`, cascading upward
 - **Document register** — JSON + Markdown index of all built outputs for audit trails
@@ -71,8 +72,8 @@ Markdown source on the left, the generated PDF on the right, in the [browser edi
 uv tool install https://github.com/gregshallardau/md-doc-pipeline/releases/download/v0.4.0/md_doc_pipeline-0.4.0-py3-none-any.whl
 md-doc doctor
 
-# With optional extras (azure, s3, mermaid):
-uv tool install "md-doc-pipeline[azure,s3,mermaid] @ https://github.com/gregshallardau/md-doc-pipeline/releases/download/v0.4.0/md_doc_pipeline-0.4.0-py3-none-any.whl"
+# With optional extras (azure, s3, mermaid, charts):
+uv tool install "md-doc-pipeline[azure,s3,mermaid,charts] @ https://github.com/gregshallardau/md-doc-pipeline/releases/download/v0.4.0/md_doc_pipeline-0.4.0-py3-none-any.whl"
 ```
 
 `pip install <wheel URL>` works the same way inside a virtual environment. The browser editor, Neovim plugin and Filament plugin are installed from a checkout (below).
@@ -426,7 +427,7 @@ The `.dotx` file is ready to open in Word — tab through the Text Form Fields a
 | `md-doc new folder NAME` / `new doc NAME` | Scaffold a folder (with `_meta.yml`) or a document (`--in DIR`) |
 | `md-doc theme init [DIR]` / `theme override [DIR]` | Write a full `_pdf-theme.css`, or a colour-only override of the parent theme |
 | `md-doc export [SOURCE]` | Build only notes marked `export: true` (`--tag`, `-o`, `-f`, `-w`) |
-| `md-doc extract FILE` | Convert a PDF or DOCX to Markdown |
+| `md-doc extract FILE` | Convert a Word, PowerPoint, Excel, HTML or PDF file to Markdown |
 | `md-doc sync [ROOT]` | Upload built files to Azure, S3 or a folder (`-b`, `--dry-run`, `-w`) |
 | `md-doc register [ROOT]` | Write `register.json`, `.md` and `.csv` |
 | `md-doc workspaces` | List named remote workspaces |
@@ -520,4 +521,9 @@ uv run ruff check .
 uv run black --check .
 uv run mypy md_doc/
 ```
+## Licence
+
+MIT (`LICENSE`). Third-party notices (Vega and Vega-Lite specs, basemap data, bundled browser libraries):
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 {% endraw %}

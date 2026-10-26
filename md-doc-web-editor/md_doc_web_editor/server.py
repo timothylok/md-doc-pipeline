@@ -6,6 +6,9 @@ The server is intentionally small.  Five categories of endpoint:
   * ``/api/file``                — read / write a single file (sandboxed)
   * ``/api/config``, ``/api/css``, ``/api/includes``
                                   — derived data for the right-panel tabs
+  * ``/api/refactor/scan``, ``/api/refactor/apply``, ``/api/refactor/ignore``
+                                  — find text repeated across documents and move it
+                                    into a shared template
   * ``/api/build``               — run ``md-doc build`` and return a token
   * ``/api/build/{token}``       — stream the built PDF/DOCX
 
@@ -53,6 +56,28 @@ class WriteRequest(BaseModel):
     path: str
     content: str
     revision: str | None = None
+
+
+class RefactorRequest(BaseModel):
+    path: str = ""
+    min_docs: int = 2
+    min_chars: int = 80
+    key: str
+    name: str
+    documents: list[str]
+    revisions: dict[str, str]
+    folder: str | None = None  # templates folder; default: closest one the documents share
+
+
+class IgnoreRequest(BaseModel):
+    path: str = ""
+    key: str
+    ignored: bool
+    name: str = ""
+
+
+class ChartSource(BaseModel):
+    source: str
 
 
 class BuildRequest(BaseModel):
@@ -359,6 +384,31 @@ def create_app(workspace: Path | None = None, *, project: Path | None = None) ->
         ws, full = _locate(path)
         return JSONResponse(_resolve_css(full, ws.root, _prefix(ws)))
 
+    # ── Chart wizard ──────────────────────────────────────────────────────────
+
+    @app.get("/api/charts/config")
+    def chart_config(path: str | None = None) -> JSONResponse:
+        """Vega config for the chart wizard's preview, in this document's theme."""
+        from md_doc import charts
+        from md_doc.mermaid import diagram_theme
+
+        theme = None
+        if path:
+            ws, full = _locate(path)
+            css = _resolve_css(full, ws.root, _prefix(ws))["css"]
+            theme = diagram_theme(css) if css else None
+        return JSONResponse(charts.vega_config(theme))
+
+    @app.post("/api/charts/parse")
+    def chart_parse(req: ChartSource) -> JSONResponse:
+        """A chart block's YAML (or JSON) as a spec, so the wizard can read an existing chart back."""
+        from md_doc import charts
+
+        try:
+            return JSONResponse({"spec": charts.parse_spec(req.source)})
+        except charts.ChartError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
     # ── Included templates ────────────────────────────────────────────────────
 
     @app.get("/api/template")
@@ -391,6 +441,177 @@ def create_app(workspace: Path | None = None, *, project: Path | None = None) ->
                 ),
             }
         )
+
+    # ── Shared-content refactor ───────────────────────────────────────────────
+
+    _FRAGMENT_NAME = re.compile(r"[a-z0-9][a-z0-9_.-]{0,60}")
+    _IGNORED_FILE = ".editor-ignored-matches.json"
+
+    def _api_path(ws: Workspace, path: Path) -> str:
+        return _prefix(ws) + path.relative_to(ws.root).as_posix()
+
+    def _display_path(ws: Workspace, path: Path) -> str:
+        """API path for files in the workspace; a project handle for shared templates above it."""
+        if path.is_relative_to(ws.root):
+            return _api_path(ws, path)
+        return "project:" + path.relative_to(_find_repo_root(ws.root)).as_posix()
+
+    def _ignored(ws: Workspace) -> dict[str, Any]:
+        import json
+
+        try:
+            data = json.loads((ws.root / _IGNORED_FILE).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _refactor_groups(path: str, min_docs: int, min_chars: int):
+        from md_doc.refactor import find_shared_sections
+
+        ws, folder = _locate(path)
+        if not folder.is_dir():
+            raise HTTPException(400, "Choose a folder to scan")
+        if not 2 <= min_docs <= 100 or not 10 <= min_chars <= 10_000:
+            raise HTTPException(400, "Minimum documents or characters out of range")
+        return ws, find_shared_sections(folder, min_docs, min_chars)
+
+    @app.get("/api/refactor/scan")
+    def refactor_scan(path: str = "", min_docs: int = 2, min_chars: int = 80) -> JSONResponse:
+        from md_doc.refactor import _discover
+
+        from .snapshots import revision
+
+        ws, groups = _refactor_groups(path, min_docs, min_chars)
+        scanned = len(_discover(_locate(path)[1]))
+        ignored = _ignored(ws)
+        result = []
+        for g in groups:
+            lines = g.text.splitlines()
+            result.append(
+                {
+                    "key": g.key,
+                    "name": g.name,
+                    "existing": g.existing,
+                    "ignored": g.key in ignored,
+                    "target": _display_path(ws, g.target),
+                    "chars": g.chars,
+                    "copies": len(g.occurrences),
+                    "lines": len(lines),
+                    "preview": "\n".join(lines[:8]),
+                    "text": g.text[:20_000],
+                    "occurrences": [
+                        {
+                            "path": _api_path(ws, o.doc.path),
+                            "line": o.start_line,
+                            "endLine": o.end_line,
+                            "revision": revision(o.doc.path.read_bytes()),
+                        }
+                        for o in g.occurrences
+                    ],
+                }
+            )
+        return JSONResponse({"scanned": scanned, "groups": result})
+
+    @app.post("/api/refactor/ignore")
+    def refactor_ignore(req: IgnoreRequest) -> JSONResponse:
+        """Hide (or restore) a match so it moves to the panel's Hidden list."""
+        import json
+
+        from .snapshots import atomic_write
+
+        if not re.fullmatch(r"t?[0-9a-f]{15,16}", req.key):
+            raise HTTPException(400, "Unknown match")
+        ws, _ = _locate(req.path)
+        with write_lock:
+            data = _ignored(ws)
+            if req.ignored:
+                data[req.key] = {"name": req.name[:120]}
+            else:
+                data.pop(req.key, None)
+            atomic_write(ws.root / _IGNORED_FILE, json.dumps(data, indent=2, sort_keys=True) + "\n")
+        return JSONResponse({"ok": True, "ignored": req.ignored})
+
+    @app.post("/api/refactor/apply")
+    def refactor_apply(req: RefactorRequest) -> JSONResponse:
+        from md_doc.refactor import apply_groups
+
+        from .snapshots import atomic_write, preserve_revision, revision
+
+        with write_lock:
+            ws, groups = _refactor_groups(req.path, req.min_docs, req.min_chars)
+            group = next((g for g in groups if g.key == req.key), None)
+            if group is None:
+                raise HTTPException(409, "This text changed on disk; scan again")
+            name = req.name.strip().removesuffix(".md")
+            if group.existing:
+                if not req.documents:
+                    raise HTTPException(400, "Choose at least one document")
+            else:
+                if not _FRAGMENT_NAME.fullmatch(name) or name.endswith("."):
+                    raise HTTPException(
+                        400, "Name may use lowercase letters, digits, '-', '_' and '.' only"
+                    )
+                if len(set(req.documents)) < 2:
+                    raise HTTPException(400, "Choose at least two documents")
+            chosen = set(req.documents)
+            group.occurrences = [
+                o for o in group.occurrences if _api_path(ws, o.doc.path) in chosen
+            ]
+            if {_api_path(ws, o.doc.path) for o in group.occurrences} != chosen:
+                raise HTTPException(409, "A chosen document no longer has this text; scan again")
+            stale = [
+                _api_path(ws, o.doc.path)
+                for o in group.occurrences
+                if revision(o.doc.path.read_bytes()) != req.revisions.get(_api_path(ws, o.doc.path))
+            ]
+            if stale:
+                raise HTTPException(
+                    409, {"message": "Changed on disk since the scan: " + ", ".join(stale)}
+                )
+            if not group.existing:
+                group.name = name
+                group.include = f"{name}.md"
+                # Includes only resolve from a templates/ folder in the documents' common
+                # folder or one of its parents, so those are the only valid locations.
+                common = Path(os.path.commonpath([o.doc.path.parent for o in group.occurrences]))
+                allowed = [common / "templates"]
+                for parent in common.parents:
+                    if not parent.is_relative_to(ws.root):
+                        break
+                    allowed.append(parent / "templates")
+                chosen_dir = allowed[0] if req.folder is None else _locate(req.folder)[1]
+                if chosen_dir not in allowed:
+                    raise HTTPException(
+                        400, "Templates must live in a templates folder shared by every document"
+                    )
+                group.target = chosen_dir / f"{name}.md"
+                if group.target.exists():
+                    raise HTTPException(409, f"{_api_path(ws, group.target)} already exists")
+
+            def write(target: Path, text: str) -> None:
+                if target.exists():
+                    preserve_revision(target, target.read_bytes())
+                    preserve_revision(target, text.encode("utf-8"))
+                atomic_write(target, text)
+
+            try:
+                apply_groups([group], _find_repo_root(ws.root), write=write)
+            except Exception as exc:
+                raise HTTPException(422, f"Nothing was changed: {exc}") from exc
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "template": _display_path(ws, group.target),
+                    "existing": group.existing,
+                    "changed": [
+                        {
+                            "path": _api_path(ws, o.doc.path),
+                            "revision": revision(o.doc.path.read_bytes()),
+                        }
+                        for o in group.occurrences
+                    ],
+                }
+            )
 
     # ── Build (calls md-doc CLI as a sidecar) ─────────────────────────────────
 

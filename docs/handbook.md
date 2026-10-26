@@ -797,6 +797,133 @@ in config are resolved through the document, ancestors, repo-root cascade instea
 
 ![Example organisation logo](../examples/feature-showcase/logo.png)
 
+<a id="markdown-review-markup"></a>
+
+### Review markup (CriticMarkup)
+
+Reviewers can mark up the Markdown source with [CriticMarkup](https://criticmarkup.com/)
+instead of editing it directly. A build then applies, reverts or shows the marks.
+
+| Mark | Meaning |
+|------|---------|
+| `{++added++}` | Insertion |
+| `{--deleted--}` | Deletion |
+| `{~~old~>new~~}` | Substitution |
+| `{==highlighted==}` | Highlight |
+| `{>>comment<<}` | Comment (usually straight after a highlight) |
+
+```markdown
+The deadline is {~~Friday~>Monday~~}. {==Budget approval==}{>>Is this still current?<<}
+
+- {++A bullet the reviewer wants added++}
+```
+
+`review_markup` (or `md-doc build --review MODE`) chooses what happens:
+
+| Mode | Result |
+|------|--------|
+| `accept` (default) | Every change is applied; highlights keep their text; comments disappear. Clean output never leaks edits. |
+| `reject` | Every change is reverted; highlights keep their text; comments disappear. |
+| `show` | The full markup: every change visible, as below. |
+| `simple` | Word's "simple markup": the final text with changes applied, a change bar beside each changed line, and the highlights and comments kept. |
+| `hybrid` | The final text with a light highlight and a margin bar on every change, and each change written out in full in a review column beside it (what was deleted, what was added), with the comments. In Word it is the same as `show`. |
+
+In `show` mode:
+
+- **PDF** — insertions are green on a green wash and underlined, deletions red on a red wash and
+  struck through, highlights yellow. Comments are not drawn in the document: each is a dark
+  colour-coded tint in the text (a coloured highlight, or a small coloured tick where there is no
+  text to tint) and a matching note, marked with the same colour, in a **review column** in the right margin,
+  level with the line it is about (see below).
+- **Word** (`.docx`) — real tracked changes and comments, attributed to `review_author`, that a
+  reviewer can accept or reject in Word. Inside table cells Word shows the marks as formatting
+  (underline, strike-through, highlight) rather than tracked changes, and cell comments are
+  dropped.
+- **Slides** treat `show`, `simple` and `hybrid` as `accept`.
+
+Marked-up Word files (`show` and `simple`) also start with a one-line key (reviewer, counts, what
+the markup means); `accept` and `reject` files never do.
+
+The markup has its own look, kept apart from the document's: the key, the colour-coded tints and
+swatches and the margin notes use neutral grey type, never the theme's callout boxes, colours
+or rules, so a comment cannot be mistaken for part of the document.
+
+#### The review column (PDF)
+
+In `hybrid` mode the text carries only a light tint and a bar, and the changes live in the review
+column. Every change and comment is colour-coded. Its text is tinted in that colour with a
+matching underline (a highlight, or the changed words), or, where there is no text to tint (a
+deletion, or a stand-alone comment), marked by a small tick of that colour. In the column the
+same colour is a swatch beside its note, written out as `ADDED`, `DELETED` or `CHANGED old → new`.
+There are ten colours, used in document order, so neighbours always differ. A deleted line has no
+text to tint, so its tick sits at the end of the line above.
+
+Notes are grouped into one card per paragraph, list item, heading or table row and sit level with
+the start of that block, so a block's notes are beside it. Where cards would overlap, a stack is
+centred on the lines its notes belong to, so each lands as close to its own text as the space
+allows. In `show` and `simple` modes the column holds only the comments, when there are any.
+
+To make room, the PDF works the way Word's "all markup" view does. The page gets a 72 mm review
+column on its right, the text area stays exactly
+as it was, and the whole PDF is scaled back to the paper size, so the sheet is still A4 (or
+whatever the theme sets) with the document shrunk to about three quarters. Because the text area
+is untouched, every line and page break matches the clean version, so a reviewer can compare the
+two page for page. The key sits at the top of the column, and each comment is placed beside its
+line; where two would collide the later one moves down. A page with more comments than the column
+holds packs them tightly from the top; where a busy paragraph forces its notes down, the colour
+and underline still tie each note to its words. Landscape sections are not given a review column. Note text
+is set large enough to read after the shrink (about the size of the body text).
+
+In Word, comments are Word's own margin comments, so nothing is shrunk by md-doc: Word's review
+pane does that itself.
+
+In `simple` mode the text reads as the finished document, and a red change bar marks every
+changed block in the **right-hand page margin**, in one vertical strip down the page, so the
+bars line up whatever sits beside them (a paragraph, a list item, a heading, a whole callout, or
+a table row). A deleted line leaves no bar, since nothing remains to mark. Highlights and
+comments appear as in `show`.
+
+- **PDF** — each bar is drawn from the laid-out position of the changed block, a fixed distance
+  beyond the text edge; a block split across pages gets a bar on each page. A change inside a
+  callout flags the whole box.
+- **Word** — the bar is a red right-hand border on each changed paragraph, with a gap that puts it
+  in the margin; a shaded callout's shading stretches to meet it. A changed table row gets a red
+  right edge on its last cell, which stays at the table's edge. Highlights are kept and comments
+  are real Word comments; no tracked changes are created.
+
+#### One build, several versions
+
+`review_exports` writes a separate file for each version you name, so a reviewed draft can go
+out as a clean copy, a quick-read copy and a full markup in one command:
+
+```yaml
+review_exports: [clean, simple, hybrid, markup]
+```
+
+| Variant | Mode | File |
+|---------|------|------|
+| `clean` | `accept` | `report-clean.pdf` |
+| `original` | `reject` | `report-original.pdf` |
+| `simple` | `simple` | `report-simple.pdf` |
+| `hybrid` | `hybrid` | `report-hybrid.pdf` |
+| `markup` (or `full`) | `show` | `report-markup.pdf` |
+
+Every format in `outputs` is built for every variant (`report-markup.docx` is the tracked-changes
+Word file), and each file is skipped when it is up to date. `md-doc build --review MODE` builds
+just that one version, ignoring `review_exports`. Slides ignore review marks, so every variant of
+a deck is the same.
+
+```yaml
+review_markup: show          # in a draft's frontmatter
+review_author: Greg Shallard
+```
+
+Marks inside code blocks and inline code stay literal, and a mark may span lines, paragraphs, a
+list item or a table cell; a removed mark that owned its lines takes them with it. `md-doc lint`
+reports a mark that is never closed, and warns when a `status: final` document still has any.
+Going the other way, `md-doc extract` turns Word tracked changes and comments in a `.docx` into
+the same marks, so a reviewed Word file returns to the Markdown source with its edits intact.
+
 <a id="markdown-page-breaks-and-sections"></a>
 
 ### Page breaks and sections
@@ -865,9 +992,18 @@ This text starts on the next page.
 - Extra blank lines add vertical space: each blank line beyond the first becomes one empty line in PDF
   and Word (code blocks are untouched). Set `preserve_blank_lines: false` to collapse them like
   plain Markdown.
-- Single line breaks inside a paragraph are joined with a space, as in plain Markdown. Set
-  `preserve_line_breaks: true` to keep each one as a line break (or end a line with two spaces for a
-  one-off break).
+- Single line breaks inside a paragraph are joined with a space, as in plain Markdown, so an
+  address block written on consecutive lines prints on one line. Three ways to get real line
+  breaks:
+  - **End the line with a backslash** (`[[Address1]]\`). This is the CommonMark, GitHub and
+    Pandoc way, it is visible, and it survives editors that strip trailing spaces. It works in
+    PDF, Word, `.dotx` and slides. It is left alone inside code blocks and inline code, in
+    display maths and table rows, when doubled (`\\` is a literal backslash), and when it ends a
+    paragraph (it prints as a backslash).
+  - **End the line with two spaces.** Same result, but invisible.
+  - **Set `preserve_line_breaks: true`** (in `_meta.yml` or frontmatter) to keep *every* line
+    break in the source, as Obsidian and chat tools do. Use it in a folder of short-line
+    documents such as letters; avoid it where you hand-wrap long paragraphs.
 - `body_text_align: justify` (config) justifies Word body text.
 - Wrap a section in `<div style="text-align: left">…</div>` to override alignment for it; every
   paragraph and heading inside inherits it. PDF uses the CSS directly.
@@ -888,6 +1024,275 @@ This paragraph is centred.
 
 </div>
 
+<a id="markdown-charts-vega"></a>
+
+### Charts (Vega-Lite and Vega)
+
+For data charts, use a fenced `chart` block holding a [Vega-Lite](https://vega.github.io/vega-lite/)
+spec written as YAML (or JSON). A full [Vega](https://vega.github.io/vega/) spec works the same way
+(it is recognised by its `$schema` or its `marks`). `vega-lite` and `vega` are accepted as the fence
+language too.
+
+````markdown
+```chart
+data: {url: sales.csv}
+mark: {type: line, point: true}
+encoding:
+  x: {field: month, type: ordinal, sort: [Jan, Feb, Mar]}
+  y: {field: revenue, type: quantitative}
+  color: {field: region, type: nominal}
+```
+````
+
+- **Don't write the spec by hand.** In the browser editor, **Insert → Chart…** is a step-by-step
+  builder (type, data, customize, insert) with a live preview in this document's own theme. It offers
+  every chart in the [catalogue](#markdown-charts-catalogue) below, shows a thumbnail drawn from each
+  chart's own sample data, lets you paste a table or edit the sample, and inserts the block at the
+  cursor. The presentation framework's studio has the same wizard, and its Markdown slides take the
+  same block, so a chart is the same in a document and on a slide.
+- **Editing a chart again.** Right-click inside a chart block and choose **Edit chart…** (or
+  **Insert → Edit chart at cursor**). The wizard reads the block itself: it recognises which upstream
+  example the spec is, takes your table out of the data and works out which of your columns stand where the
+  example's fields were, then opens on that one chart type with everything filled in (the type cannot be changed;
+  insert a new chart for that). **Update chart** replaces the block in place. Nothing is stored in the block, so a
+  chart you pasted from the Vega documentation, or edited by hand (a number in the data, a different title), opens
+  the same way. A chart that matches none of the wizard's types is left for you to edit by hand, and the
+  wizard says so. In the deck studio you can also right-click a chart on the slide.
+- **Data.** Inline with `data: {values: [...]}`, or `data: {url: file.csv}` (`.csv`, `.tsv` or `.json`)
+  read relative to the document. Full Vega's named datasets (`data: [{name: table, url: file.csv}]`)
+  use the same resolution, including built-in maps. Local JSON keeps `format` settings such as
+  `property` and TopoJSON `feature`. Remote URLs are not fetched at build time.
+- **Built-in maps.** `data: {url: "vega-datasets:world-110m"}` (countries; ISO 3166-1 numeric ids) and
+  `vega-datasets:us-10m` (US states and counties; FIPS ids) are bundled with md-doc and never fetched.
+  The map charts below match your data to them by name, ISO code or FIPS code.
+- **Theme.** The spec holds data and encodings only. Colours, fonts, gridlines and the series palette
+  come from the same theme as Mermaid diagrams (`--mddoc-diagram-*` properties and the brand colours;
+  the series lead with the brand primary), and anything under the spec's own `config` wins.
+- **Size.** `width` and `height` size the whole chart including axes and legend. The default width is
+  the text column (at most 720px) and the default height 320px; `width: container` means the default.
+  Charts that carry their own layout (the full-Vega ones, repeats and facets) keep their own size.
+- **Same chart every time.** A build never uses random numbers, so a chart is identical on every build
+  and between a document and a slide. Where Vega-Lite would bootstrap a confidence interval from random
+  resamples, the wizard uses mean ± 1.96 standard errors (or standard error, standard deviation, or
+  quartiles, as you choose). Jitter is fixed when the chart is inserted.
+- **Formats.** PDF gets vector SVG; Word and PowerPoint get a 2x PNG. Interactive features (tooltips,
+  selections, bound controls) show only in the presentation framework, which runs the same spec in the
+  browser.
+- **Install.** Needs the optional `charts` extra: `uv sync --extra charts`. Without it, or when a spec is
+  invalid (including malformed or unreadable data files), the build warns and leaves the block as a code block.
+
+Use Mermaid for flowcharts, sequences and the other diagrams below, and `chart` for data.
+
+<a id="markdown-charts-catalogue"></a>
+
+#### Chart catalogue
+
+Every chart the wizard builds is an official **Vega-Lite or Vega example, verbatim**, with two things filled
+in: your table in place of the example's data, and your column names in place of the example's field names.
+Nothing is computed into the block, so what it holds is the upstream spec: copy it into the Vega editor or any
+other Vega renderer and it draws the same chart. A few examples carry steps that only made sense for their own
+dataset (a filter on one year, a title naming the example's field); those are the *edits* listed after the
+tables, each with its reason. The **Upstream example** column names the source file in
+[vega-lite](https://github.com/vega/vega-lite/tree/main/examples/specs) or
+[vega](https://github.com/vega/vega/tree/main/docs/examples). A chart with no upstream example is written in the
+same style from the nearest example's own marks and transforms, and says so. The wizard only offers the
+options its upstream example supports (the Labels option on the horizontal bar, for instance, switches to
+upstream's own `layer_bar_labels` example).
+
+Two things to know. **Word cloud** and **contour plot** use Vega transforms that need a canvas, which the
+renderer md-doc uses for PDF and Word does not have, so they draw in the browser and on slides but not in a PDF
+build yet (the wizard warns when you insert them, and a document build leaves the block as a code block and says why
+instead of drawing it blank). **Error bars** and the **confidence band** are resampled by
+Vega-Lite on every render, so they differ slightly each time; that is upstream's behaviour.
+
+**Compare** — categories side by side
+
+| Chart | Id | Reads these columns | Upstream example |
+|-------|----|---------------------|------------------|
+| Bar | `bar` | Category, Value | `vega-lite/bar` |
+| Horizontal bar | `hbar` | Category, Value | `vega-lite/layer_bar_labels`, `vega-lite/bar_aggregate` |
+| Grouped bar | `bar-grouped` | Category, Value, Group | `vega-lite/bar_grouped` |
+| Stacked bar | `bar-stacked` | Category, Value, Stack by | `vega-lite/stacked_bar_h` |
+| 100% stacked bar | `bar-percent` | Category, Value, Stack by | `vega-lite/stacked_bar_normalize` |
+| Slope chart | `slope` | Period, Value, Series | `vega-lite/line_slope` |
+| Bump chart | `bump` | Period, Score, Item | `vega-lite/window_rank` |
+| Dumbbell | `dumbbell` | Value, Item, Which of the two | `vega-lite/layer_ranged_dot` |
+| Waterfall | `waterfall` | Step, Change | `vega-lite/waterfall_chart` |
+| Population pyramid | `pyramid` | Category, Value, Side | `vega-lite/bar_diverging_stack_population_pyramid` |
+| Mosaic (Marimekko) | `marimekko` | Rows, Columns | `vega-lite/rect_mosaic_labelled_with_offset` |
+| Bar with negatives | `bar-posneg` | Category, Value | `vega-lite/bar_negative` |
+| Diverging stacked bar | `bar-diverging` | Question, Response, Percentage | `vega-lite/bar_diverging_stack_transform` |
+| Radar | `radar` | Spoke, Value, Series | `vega/radar-chart` |
+| Lollipop | `lollipop` | Category, Value | none (same style) |
+| Dot plot | `dot-plot` | Category, Value | none (same style) |
+| Funnel | `funnel` | Stage, Count | none (same style) |
+| Pareto | `pareto` | Category, Count | none (same style) |
+
+**Change over time** — trends, ranges and timelines
+
+| Chart | Id | Reads these columns | Upstream example |
+|-------|----|---------------------|------------------|
+| Line | `line` | Date, Value | `vega-lite/line` |
+| Step line | `step` | Date, Value | `vega-lite/line_step` |
+| Area | `area` | Date, Value | `vega-lite/area` |
+| Stacked area | `area-stacked` | Date, Value, Series | `vega-lite/stacked_area` |
+| 100% stacked area | `area-percent` | Date, Value, Series | `vega-lite/stacked_area_normalize` |
+| Streamgraph | `streamgraph` | Date, Value, Series | `vega-lite/stacked_area_stream` |
+| Gantt | `gantt` | Task, Start, End | `vega-lite/bar_gantt` |
+| Rolling average | `moving-average` | Date, Value | `vega-lite/layer_line_rolling_mean_point_raw` |
+| Range and line | `combo` | Date, Range top, Range bottom, Line | `vega-lite/layer_dual_axis` |
+| Candlestick | `candlestick` | Date, Open, High, Low, Close | `vega-lite/layer_candlestick` |
+| Horizon | `horizon` | Position, Value | `vega-lite/area_horizon` |
+| Cumulative total | `cumulative` | Values | `vega-lite/area_cumulative_freq` |
+| Mean with confidence band | `error-band` | Date, Values | `vega-lite/layer_line_errorband_ci` |
+| Range area | `range-area` | Date, Low, High | none (same style) |
+| OHLC bars | `ohlc` | Date, Open, High, Low, Close | none (same style) |
+| Sparkline | `sparkline` | Date, Value | none (same style) |
+| Control chart | `control-chart` | Sample, Measurement | none (same style) |
+| Timeline | `timeline` | Date, Event | none (same style) |
+
+**Distribution** — how values are spread
+
+| Chart | Id | Reads these columns | Upstream example |
+|-------|----|---------------------|------------------|
+| Histogram | `histogram` | Values | `vega-lite/histogram` |
+| Histogram by group | `histogram-grouped` | Values, Group | `vega-lite/trellis_bar_histogram` |
+| Dot histogram | `dot-histogram` | Values | `vega-lite/circle_wilkinson_dotplot` |
+| Density | `density` | Values | `vega-lite/area_density` |
+| Density by group | `density-groups` | Values, Group | `vega-lite/area_density_stacked` |
+| Ridgeline | `ridgeline` | Values, Group | `vega-lite/area_density_facet` |
+| Box plot | `box` | Group, Values | `vega-lite/boxplot_2D_vertical` |
+| Strip plot | `strip` | Values, Group | `vega-lite/tick_strip` |
+| Mean with error bars | `error-bars` | Group, Values | `vega-lite/layer_point_errorbar_ci` |
+| Cumulative distribution | `ecdf` | Values | `vega-lite/area_cumulative_freq` |
+| Q-Q plot | `qq-plot` | Values | `vega-lite/point_quantile_quantile` |
+| Violin | `violin` | Group, Values | `vega/violin-plot` |
+
+**Relationships** — how measures relate
+
+| Chart | Id | Reads these columns | Upstream example |
+|-------|----|---------------------|------------------|
+| Scatter | `scatter` | X, Y | `vega-lite/point_2d` |
+| Bubble | `bubble` | X, Y, Size | `vega-lite/point_bubble` |
+| Scatter with trend | `scatter-trend` | X, Y | `vega-lite/layer_point_line_loess`, `vega-lite/layer_point_line_regression` |
+| Connected scatter | `connected-scatter` | X, Y, Order | `vega-lite/connected_scatterplot` |
+| Parallel coordinates | `parallel` | Colour by, Measures | `vega-lite/parallel_coordinate` |
+| Scatter matrix | `scatter-matrix` | Measures, Colour by (optional) | `vega-lite/interactive_splom` |
+| Quadrant | `quadrant` | X, Y, Label (optional) | none (same style) |
+| Venn diagram | `venn` | Sets in the region, Items in exactly that region | none (same style) |
+
+**Parts of a whole** — shares and proportions
+
+| Chart | Id | Reads these columns | Upstream example |
+|-------|----|---------------------|------------------|
+| Pie | `pie` | Slice label, Slice size | `vega-lite/arc_pie` |
+| Donut | `donut` | Slice label, Slice size | `vega-lite/arc_donut` |
+| Nightingale rose | `rose` | Values | `vega-lite/arc_radial` |
+| Radial bar | `radial-bar` | Ring label, Value | none (same style) |
+| Waffle | `waffle` | Category, Amount | none (same style) |
+| Pictogram | `pictogram` | Category, Amount | none (same style) |
+
+**Heatmaps and matrices** — intensity across two dimensions
+
+| Chart | Id | Reads these columns | Upstream example |
+|-------|----|---------------------|------------------|
+| Heatmap | `heatmap` | Rows, Columns, Colour | `vega-lite/rect_heatmap` |
+| Heatmap with counts | `heatmap-annotated` | Rows, Columns | `vega-lite/layer_text_heatmap` |
+| 2D histogram | `hist2d` | X, Y | `vega-lite/rect_binned_heatmap` |
+| Calendar | `calendar` | Date, Closing value | `vega/calendar-view` |
+| Contour plot | `contour` | X, Y, Group | `vega/contour-plot` |
+| Correlation matrix | `correlation` | Measures | none (same style) |
+
+**Progress and KPIs** — single numbers and targets
+
+| Chart | Id | Reads these columns | Upstream example |
+|-------|----|---------------------|------------------|
+| Bullet chart | `bullet` | Measure, Band 1, Band 2, Band 3, Actual, Comparison, Target | `vega-lite/facet_bullet` |
+| Gauge | `gauge` | Label (optional), Value | none (same style) |
+
+**Hierarchies** — nested and tree-shaped data
+
+| Chart | Id | Reads these columns | Upstream example |
+|-------|----|---------------------|------------------|
+| Treemap | `treemap` | Id, Label (optional), Parent id, Size | `vega/treemap` |
+| Sunburst | `sunburst` | Id, Label (optional), Parent id, Size | `vega/sunburst` |
+| Circle packing | `circle-pack` | Id, Label (optional), Parent id, Size | `vega/circle-packing` |
+| Tree | `tree` | Id, Label (optional), Parent id, Size | `vega/tree-layout` |
+| Radial tree | `radial-tree` | Id, Label (optional), Parent id, Size | `vega/radial-tree-layout` |
+| Icicle | `icicle` | Id, Label (optional), Parent id, Size | `vega/sunburst` |
+| Dendrogram | `dendrogram` | Id, Label (optional), Parent id, Size | `vega/tree-layout` |
+
+**Flows and networks** — connections between things
+
+| Chart | Id | Reads these columns | Upstream example |
+|-------|----|---------------------|------------------|
+| Arc diagram | `arc-diagram` | From, To, Weight (optional), Group of the “From” item (optional) | `vega/arc-diagram` |
+| Force network | `force` | From, To, Weight (optional), Group of the “From” item (optional) | `vega/force-directed-layout` |
+| Edge bundling | `edge-bundling` | From, To | `vega/edge-bundling` |
+| Chord | `chord` | From, To, Amount (optional) | none (same style) |
+| Sankey | `sankey` | From, To, Amount (optional) | none (same style) |
+
+**Text** — words sized by weight
+
+| Chart | Id | Reads these columns | Upstream example |
+|-------|----|---------------------|------------------|
+| Word cloud | `word-cloud` | Text | `vega/word-cloud` |
+
+**Maps** — values by place
+
+| Chart | Id | Reads these columns | Upstream example |
+|-------|----|---------------------|------------------|
+| US county map | `map-us` | County FIPS id, Value | `vega-lite/geo_choropleth` |
+| US point map | `bubble-map-us` | Latitude, Longitude | `vega-lite/geo_layer` |
+| World map | `map-world` | Country, Value | `vega-lite/geo_choropleth` |
+| World point map | `bubble-map-world` | Latitude, Longitude | `vega-lite/geo_layer` |
+
+**Edits to upstream specs**
+
+Every other chart is its upstream example with only your data and column names filled in. These are the exceptions, each removing or replacing something that only made sense for the example’s own data:
+
+| Chart | Upstream example | Edit |
+|-------|------------------|------|
+| `hbar` | `vega-lite/layer_bar_labels` | Its x scale domain [0, 60] fits the example’s three values |
+| `hbar` | `vega-lite/bar_aggregate` | It keeps one year (`datum.year == 2000`) of a multi-year file; your table is the data |
+| `hbar` | `vega-lite/bar_aggregate` | Its x axis title “population” names the example’s own field |
+| `bar-percent` | `vega-lite/stacked_bar_normalize` | It filters one year and derives `gender` from the example’s `sex` code; your table already has the split |
+| `bar-percent` | `vega-lite/stacked_bar_normalize` | Its y axis title “population” names the example’s own field |
+| `line` | `vega-lite/line` | It plots one stock (`symbol === 'GOOG'`) from a multi-stock file; your table is the series |
+| `step` | `vega-lite/line_step` | It plots one stock (`symbol === 'GOOG'`) from a multi-stock file; your table is the series |
+| `area` | `vega-lite/area` | Its y axis title “count” names the example’s own field |
+| `bump` | `vega-lite/window_rank` | Its chart title names the example’s own data |
+| `bump` | `vega-lite/window_rank` | Its ranking breaks ties on a second column (`diff`) your table does not have |
+| `bump` | `vega-lite/window_rank` | Its colour scale lists the example’s four teams with fixed colours |
+| `dumbbell` | `vega-lite/layer_ranged_dot` | It keeps five named countries and two years of a larger file |
+| `dumbbell` | `vega-lite/layer_ranged_dot` | Its axis and legend titles are the example’s own wording |
+| `dumbbell` | `vega-lite/layer_ranged_dot` | Its colour scale pins the example’s two years (1955, 2000) |
+| `waterfall` | `vega-lite/waterfall_chart` | Its x axis title “Months” is the example’s own wording; here it is your column |
+| `waterfall` | `vega-lite/waterfall_chart` | Its y axis title “Amount” is the example’s own wording; here it is your column |
+| `pyramid` | `vega-lite/bar_diverging_stack_population_pyramid` | It filters one year and derives `gender` from the example’s `sex` code; your table has Gender (Female / Male) already, which also decides which side a bar is drawn on |
+| `pyramid` | `vega-lite/bar_diverging_stack_population_pyramid` | Its x axis title “population” names the example’s own field; here it is your value column |
+| `bar-diverging` | `vega-lite/bar_diverging_stack_transform` | Its axis and legend titles (“Question”, “Response”, “Percentage”) are the example’s own wording |
+| `moving-average` | `vega-lite/layer_line_rolling_mean_point_raw` | Its layer titles (“Max Temperature”, “Rolling Mean of Max Temperature”) and axis title name the example’s own field; the axis is titled with your column |
+| `combo` | `vega-lite/layer_dual_axis` | It keeps one city (`location == "Seattle"`) of a multi-city file |
+| `combo` | `vega-lite/layer_dual_axis` | Its range axis is fixed to [0, 30] °C and titled “Avg. Temperature (°C)” / “Precipitation (inches)” for the example’s data |
+| `candlestick` | `vega-lite/layer_candlestick` | Its x axis title “Date in 2009” and %m/%d format describe the example’s data |
+| `horizon` | `vega-lite/area_horizon` | Its band height 50 (domain [0, 50] and `datum.y - 50`) is half of the example’s largest value; here it is half of yours |
+| `density` | `vega-lite/area_density` | Its x axis title “IMDB Rating” names the example’s own field |
+| `density-groups` | `vega-lite/area_density_stacked` | Its chart title names the example’s own data |
+| `density-groups` | `vega-lite/area_density_stacked` | Its density extent [2500, 6500] is the range of the example’s body masses |
+| `density-groups` | `vega-lite/area_density_stacked` | Its x axis title “Body Mass (g)” names the example’s own field |
+| `ridgeline` | `vega-lite/area_density_facet` | Its chart title names the example’s own data |
+| `ridgeline` | `vega-lite/area_density_facet` | Its density extent [2500, 6500] is the range of the example’s body masses |
+| `ridgeline` | `vega-lite/area_density_facet` | Its x axis title “Body Mass (g)” names the example’s own field |
+| `error-bars` | `vega-lite/layer_point_errorbar_ci` | Its x axis title “Barley Yield” names the example’s own field |
+| `error-band` | `vega-lite/layer_line_errorband_ci` | Its y axis title “Mean of Miles per Gallon (95% CIs)” names the example’s own field |
+| `parallel` | `vega-lite/parallel_coordinate` | Its four measures (Beak Length, Beak Depth, Flipper Length, Body Mass) are the example’s columns; they become the columns you choose |
+| `scatter-matrix` | `vega-lite/interactive_splom` | Its repeat lists the example’s three columns (Horsepower, Acceleration, Miles_per_Gallon); they become the columns you choose |
+| `icicle` | `vega/sunburst` | The partition is laid out in width × height instead of angle × radius, and the arcs become rectangles |
+| `dendrogram` | `vega/tree-layout` | Its layout option starts on “cluster” (a choice the upstream spec itself offers) instead of “tidy” |
+| `map-world` | `vega-lite/geo_choropleth` | It points at the world countries file with an equal-area world projection, in place of the US states/counties file and the albersUsa projection |
+| `bubble-map-world` | `vega-lite/geo_layer` | It points at the world countries file with an equal-area world projection, in place of the US states/counties file and the albersUsa projection |
+
 <a id="markdown-diagrams-mermaid"></a>
 
 ### Diagrams (Mermaid)
@@ -898,7 +1303,7 @@ which installs `cairosvg`; without it the code block stays as text).
 
 | Diagram | Keyword |
 |---------|---------|
-| Flowchart (8 node shapes, 4 edge styles, labels, subgraphs) | `flowchart` / `graph` |
+| Flowchart (13 node shapes, 4 edge styles, labels, classes, subgraphs) | `flowchart` / `graph` |
 | Pie and donut | `pie`, `donut` |
 | Bar chart | `bar` / `xychart-beta` |
 | Gauge | `gauge` |
@@ -908,6 +1313,30 @@ which installs `cairosvg`; without it the code block stays as text).
 | Mind map | `mindmap` |
 | Entity-relationship | `erDiagram` |
 | State | `stateDiagram`, `stateDiagram-v2` |
+| Class (UML) | `classDiagram` |
+| User journey | `journey` |
+| Git graph | `gitGraph` |
+| Quadrant chart | `quadrantChart` |
+| Sankey | `sankey`, `sankey-beta` |
+| Radar | `radar-beta` |
+| Treemap | `treemap-beta` |
+| Packet | `packet`, `packet-beta` |
+| Block | `block`, `block-beta` |
+| Kanban | `kanban` |
+| Architecture | `architecture-beta` |
+| C4 | `C4Context`, `C4Container`, `C4Component`, `C4Dynamic`, `C4Deployment` |
+| Requirement | `requirementDiagram` |
+| ZenUML | `zenuml` |
+| Use case (UML) | `usecase-beta` |
+| Swimlanes | `swimlane-beta` |
+| Agent flow | `agentflow-beta` |
+| Tree view | `treeView-beta` |
+| Ishikawa (fishbone) | `ishikawa-beta` |
+| Venn | `venn-beta` |
+| Cynefin | `cynefin-beta` |
+| Wardley map | `wardley-beta` |
+| Railroad (syntax) | `railroad-ebnf-beta`, `railroad-abnf-beta`, `railroad-peg-beta`, `railroad-beta` |
+| Event modeling | `eventmodeling` |
 
 ````markdown
 ```mermaid
@@ -927,8 +1356,1490 @@ flowchart LR
     B -- "no" --> D["Request info"]
 ```
 
-Keep labels short. Examples of every type are in
+Keep labels short. [Every diagram type has a worked example](#markdown-diagram-gallery) at the
+end of this section.
+
+**Flowchart syntax.** Everything in the usual Mermaid flowchart grammar that affects the
+drawing is supported:
+
+| Syntax | Result |
+|--------|--------|
+| `A --> B`, `A --- B`, `A -.-> B`, `A ==> B` | solid, plain line, dotted and thick edges (extra dashes are fine) |
+| `A -- text --> B`, `A -->\|text\| B`, `A -. text .-> B`, `A == text ==> B` | labelled edges, quoted or not |
+| `A --o B`, `A --x B`, `A <--> B`, `A o--o B` | circle and cross ends, two-way arrows |
+| `A --> B & C`, `B & C --> D` | fan out and in |
+| `A([x])`, `A((x))`, `A[(x)]`, `A{{x}}`, `A[[x]]`, `A>x]`, `A[/x/]`, `A[\x\]`, `A[/x\]`, `A[\x/]` | stadium, circle, cylinder, hexagon, subroutine, flag, parallelograms, trapezoids |
+| `classDef name fill:#d4edda,stroke:#28a745,color:#14532d`, `A:::name`, `class A,B name`, `style A fill:#fff` | per-node overrides (`fill`, `stroke`, `stroke-width`, `stroke-dasharray`, `color`) |
+| `linkStyle 0,2 stroke:#dc3545,stroke-width:2px`, `linkStyle default ...` | per-edge overrides, numbered in the order edges appear |
+| `subgraph id [Title]`, `subgraph "Title"`, nested `subgraph` | framed groups |
+| `A@{ shape: doc, label: "Spec" }` | Mermaid 11 shape names and aliases (`rect`, `rounded`, `stadium`, `diam`, `hex`, `cyl`, `doc`, `circle`, `lean-r`, `subproc`, ...) |
+| `A --> Group`, `Group --> B` | edges to and from a subgraph attach to its first or last member |
+
+Nodes are laid out in ranks with crossings minimised, long and looping edges run in their own
+lanes, and edges leaving one node fan out instead of sharing a line. Override individual nodes
+with `classDef` or `style`.
+
+**How diagrams look.** Every diagram type shares one design system, so a document's diagrams
+read as a set:
+
+- *Size.* A diagram renders at its natural size, with 12px labels that sit beside body text.
+  When a flowchart, state, ER or class diagram would be wider than the text column, long node
+  labels wrap, and if it is still too wide it is laid out in the other direction (left-to-right
+  becomes top-down) instead of shrinking its text. Turn that off for one diagram with
+  `%%{init: {"flowchart": {"autoFit": false}}}%%`. Word and PowerPoint use the same sizes.
+- *Fonts.* Diagrams use the theme's `body` font. Boxes are sized by measuring text with the font
+  file that will actually draw it, so wide faces such as DejaVu Sans never overflow. Fonts added
+  with the [`fonts`](#configuration) key are used in diagrams too, including the images embedded
+  in Word and PowerPoint.
+- *Structural diagrams* (flowchart, state, sequence, ER, timeline, mind map) take their colours
+  from the theme: light brand-tinted cards with a hairline border, the primary colour for start
+  and end shapes and ER headers, and the accent for decisions.
+- *Data charts* (pie, donut, bar, Gantt and the other multi-series diagrams) draw eight series
+  colours in a fixed order. With a branded theme the series start with the **primary and accent
+  colours**, then continue with the built-in colour-blind-safe colours that stay clearly different
+  from them; without a brand they are the built-in palette. A theme can set the series itself, or
+  switch back to the built-in palette: see [Diagram colours in the theme](#themes-diagram-colours).
+  Past eight slices the smallest fold into "Other". Labels and values are always in text colours,
+  never the series colour.
+- Bars are thin with rounded ends, gridlines are solid hairlines, axis ticks are round numbers
+  (0, 50, 100), large numbers are compacted (1.3K, 2.5M), and values are labelled only where
+  they fit.
+
+**Other diagram syntax.**
+
+| Diagram | Supported beyond the basics |
+|---------|------------------------------|
+| Sequence | `participant A as Alice`, `actor`, `autonumber`, `Note left of / right of / over A,B`, `loop` / `alt` / `else` / `opt` / `par` / `and` / `critical` / `break` / `rect` blocks, `activate` / `deactivate` and `->>+` / `-->>-`, arrows `->>` `-->>` `->` `-->` `-x` `--x` `-)` `--)` `<<->>` |
+| Pie / donut | `pie showData title …` on the first line; legend with percentages (and values with `showData`) |
+| Bar | `xychart-beta`, `title`, `x-axis "Title" [..]`, `y-axis "Title" 0 --> 200`, several `bar [..]` and `line [..]` series, `horizontal` |
+| Gauge | `title`, `value`, `min`, `max`, `label`, written as `value 72` or `value: 72` |
+| Gantt | `done`, `active`, `crit` and `milestone` tags, `after id`, durations or end dates; bars coloured by section on a calendar-aligned axis |
+| ER | attribute keys (`int id PK`, `string ref FK`, `PK,FK`), identifying `--` and non-identifying `..` links, crow's-foot ends for every cardinality |
+| Timeline | `title`, `section`, several events per period (`2022 : A : B`, or a line starting with `:`) |
+| Mind map | node shapes `((x))`, `(x)`, `[x]`, `{{x}}`, `))x((`; branches balanced either side of the root, one colour per branch |
+| Class | `class X { ... }` bodies or `X : +member`, visibility `+ - # ~`, static `$` (underlined), abstract `*` (italic), generics `List~int~`, `<<interface>>` and other stereotypes, `direction`, `namespace`, `note for X "..."`, relationships `<\|--` `*--` `o--` `-->` `--` `..>` `..\|>` `..` (either way round) with cardinalities `"1" --> "*"` and `: labels` |
+| User journey | `title`, `section`, `Task: score: Actor, Actor` (score 1-5 drawn as a satisfaction curve in good-to-bad status colours, actors as dots with a legend) |
+| Git graph | `commit` (`id`, `tag`, `type: HIGHLIGHT \| REVERSE`, `msg`), `branch` (`order`), `checkout` / `switch`, `merge` (`id`, `tag`), `cherry-pick id: "..."`, `gitGraph TB:` for a vertical graph |
+| Quadrant | `title`, `x-axis Low --> High`, `y-axis`, `quadrant-1`..`4`, points `Name: [x, y]` with `radius`, `color`, `stroke-color`, `stroke-width` or `:::class` + `classDef`; labels move to stay clear of each other |
+| Sankey | CSV rows `source,target,value` (quote names containing commas); config `sankey`: `showValues`, `nodeAlignment`, `linkColor` (`source`, `target` or a hex colour), `nodeWidth`, `nodePadding`, `nodeColors` |
+| Radar | `title`, `axis id["Label"], ...`, `curve id["Label"]{1, 2, 3}` or `{axis: value, ...}`, `max`, `min`, `ticks`, `graticule circle \| polygon`, `showLegend` |
+| Treemap | quoted section names and `"Leaf": value` lines, nested by indentation; config `treemap.valueFormat` (`,`, `$`, `$,.2f`, `.1%`) |
+| Packet | `start-end: "Field"`, `bit: "Flag"`, `+bits: "Field"`, `title`; config `packet`: `bitsPerRow`, `showBits`, `bitOrder: descending` |
+| Block | `columns N`, `id:span`, `space` / `space:N`, flowchart node shapes, nested `block:id:span ... end`, block arrows `id<["label"]>(right \| left \| up \| down \| x \| y)`, edges with labels, `style`, `classDef`, `class` |
+| Kanban | columns `id[Title]` (or bare titles), indented tasks `id[Text]@{ ticket: ..., assigned: ..., priority: 'Very High' \| 'High' \| 'Low' \| 'Very Low' }` |
+| Architecture | `group id(icon)[Title] in parent`, `service id(icon)[Title] in group`, `junction id`, edges `a:R --> L:b` (sides `L R T B`, `<`/`>` arrows, `{group}`), `align row \| column`; icons `cloud`, `database`, `disk`, `internet`, `server` (other icon names show a generic tile) |
+| C4 | `Person`, `System`, `Container`, `Component` with `Db` / `Queue` / `_Ext` variants, `Boundary`, `Enterprise_Boundary`, `System_Boundary`, `Container_Boundary`, `Deployment_Node` / `Node` blocks, `Rel`, `BiRel`, `Rel_U/D/L/R`, `Rel_Back`, `RelIndex`, `$named` arguments, `UpdateLayoutConfig($c4ShapeInRow, $c4BoundaryInRow)`; colours follow the C4 roles in your brand primary, grey for external |
+| Requirement | `requirement`, `functionalRequirement`, `interfaceRequirement`, `performanceRequirement`, `physicalRequirement`, `designConstraint` and `element` blocks; `a - satisfies -> b` and `b <- satisfies - a` with `contains`, `copies`, `derives`, `satisfies`, `verifies`, `refines`, `traces` |
+| Use case | `actor Name`, `Id("Use case")` ellipses, `Id[Label]` boxes, `systemBoundary Name ... end`, `A --> B`, `A ..> : include B` / `: extend B` (drawn as «include» / «extend»), `A --\|> B` generalisation, `direction LR \| TB` |
+| Swimlanes | `swimlane-beta LR \| TB`; each top-level `subgraph` is a lane, steps sit in their lane in flow order; full flowchart node and edge syntax |
+| Agent flow | `agentflow-beta TB \| LR`, `flow id["Agent"] ... end` groups, `global ... end`, typed shapes `@{ shape: task \| tool \| input \| decision \| refdoc \| action }`, `id@{ view: collapsed }` folds a flow into one node, `--x` failure edges in red |
+| Tree view | indented lines or pasted `tree` output (`├──`, `└──`); names ending `/` are folders, `## note` adds a description, `:::highlight` marks a row, `icon(...)`; config `treeView.showIcons` |
+| Ishikawa | first line is the effect; indented categories alternate above and below the spine, with causes and sub-causes nested under them |
+| Venn | `title`, `set Id["Label"]:size`, `union A,B["Label"]:size` (two or more sets), indented `text Id["Label"]` items, `style Id fill:...,color:...,stroke:...,fill-opacity:...` |
+| Cynefin | `title`, `complex` / `complicated` / `clear` / `chaotic` / `confusion` blocks of quoted items, transitions `complex --> complicated : "Label"`; config `cynefin.showDomainDescriptions`, `cynefin.boundaryAmplitude` |
+| Wardley map | `title`, `size [w, h]`, `evolution A -> B -> C` (with `@0.3` widths and `Label / Sub` pairs), `anchor` and `component Name [visibility, evolution]` with `label [dx, dy]` and `(inertia)`, `(build)`, `(buy)`, `(outsource)`, `(market)`; links `->`, `-.->`, `+>`, `+<`, `+<>`, `+'label'>`, `A -> B; label`; `evolve`, `pipeline X { ... }`, `note`, `annotations` / `annotation N,[v, e] "text"`, `accelerator`, `deaccelerator` |
+| Railroad | EBNF (`=` or `::=`, `\|`, `,`, `[ ]`, `{ }`, `?`, `*`, `+`, `A - B`, `? special ?`, comments), ABNF (`/`, `*A`, `1*A`, `2*4A`, `%x41-5A`, `;` comments), PEG (`<-`, `/`, `&A`, `!A`, `.`, `#` comments) and IR constructors (`sequence`, `choice`, `optional`, `zeroOrMore`, `oneOrMore`, `terminal`, `nonterminal`, `special`); long rules wrap onto several rows |
+| Event modeling | `tf` / `timeframe` and `rf` / `resetframe NN type Name`, types `ui`, `pcr` / `processor`, `cmd` / `command`, `rmo` / `readmodel`, `evt` / `event`; `Namespace.Name` adds a lane, inline `{ data }`, `[[DataBlock]]` with `data Name { ... }`, `->> NN` extra links; flows are inferred frame to frame unless a reset frame breaks them |
+| ZenUML | drawn as a sequence diagram: `@Actor` / `@Database` annotators, `A as Alice`, `A->B: msg`, sync calls `A.method(args) { ... }`, `x = A.method()`, `return`, `@return`, `new A()`, `if` / `else if` / `else`, `while` / `for` / `loop`, `opt`, `par`, `try` / `catch` / `finally` |
+
+**Themes, dark mode and titles.** A diagram can carry Mermaid's own configuration, either as
+`%%{init: {...}}%%` or as a front-matter `config:` block:
+
+````markdown
+```mermaid
+---
+title: Order flow
+config:
+  theme: base
+  themeVariables:
+    primaryColor: "#7a1f5c"
+---
+flowchart LR
+    A --> B
+```
+````
+
+- `theme: dark` draws the diagram for a dark background, using lifted brand colours and the dark
+  steps of the data palette. A theme whose `body` or `@page` background is dark switches every
+  diagram to dark mode automatically, and Word/PowerPoint images get the dark background.
+- `theme: neutral` (greys) and `theme: forest` (greens) replace the brand colours;
+  `theme: default` keeps them.
+- `themeVariables`: `primaryColor`, `secondaryColor` (accent), `primaryBorderColor`,
+  `primaryTextColor` / `textColor`, `lineColor`, `fontFamily`, `background` and `darkMode`.
+- A front-matter `title` is drawn above any diagram.
+
+Every Mermaid diagram type is drawn, including the beta ones listed above. A diagram type
+Mermaid adds later is left as an ordinary code block, with a warning in the build log, rather
+than drawn incorrectly.
+
+<a id="markdown-diagram-gallery"></a>
+
+#### Gallery: every diagram type
+
+Each example shows the source you type, then the diagram it produces with this handbook's theme.
+Structural diagrams, and the lead colours of the data charts, follow the theme (see
+[Diagram colours in the theme](#themes-diagram-colours)). The same examples are in
 `examples/feature-showcase/diagram-gallery.md`.
+
+##### Flowchart
+
+`flowchart`, `graph`. Nodes, edge styles and labels, classes.
+
+````markdown
+```mermaid
+flowchart LR
+    A([Customer]) -- places order --> B[/Order form/]
+    B --> C{Valid?}
+    C -->|yes| D[Pick and pack]
+    C -->|no| G[Reject]:::bad
+    D --> E[(Inventory)]
+    D --> I[Ship]
+    G -.-> A
+    classDef bad fill:#fdecea,stroke:#d03b3b
+```
+````
+
+```mermaid
+flowchart LR
+    A([Customer]) -- places order --> B[/Order form/]
+    B --> C{Valid?}
+    C -->|yes| D[Pick and pack]
+    C -->|no| G[Reject]:::bad
+    D --> E[(Inventory)]
+    D --> I[Ship]
+    G -.-> A
+    classDef bad fill:#fdecea,stroke:#d03b3b
+```
+
+##### Flowchart with groups
+
+`flowchart` with `subgraph`. Framed groups with a decision loop inside.
+
+````markdown
+```mermaid
+flowchart TD
+    S([Start]) --> A[Collect requirements]
+    subgraph Build
+        A --> B{Approved?}
+        B -->|yes| C[Implement]
+        B -->|no| A
+    end
+    C --> D[Release]
+    D --> E([Done])
+```
+````
+
+```mermaid
+flowchart TD
+    S([Start]) --> A[Collect requirements]
+    subgraph Build
+        A --> B{Approved?}
+        B -->|yes| C[Implement]
+        B -->|no| A
+    end
+    C --> D[Release]
+    D --> E([Done])
+```
+
+##### Sequence
+
+`sequenceDiagram`. Participants, messages, notes and `alt` / `loop` blocks.
+
+````markdown
+```mermaid
+sequenceDiagram
+    autonumber
+    actor C as Customer
+    participant W as Web app
+    participant P as Payments
+    participant S as Stock service
+    C->>+W: Checkout
+    W->>P: Authorise card
+    alt card approved
+        P-->>W: Approved
+        W->>S: Reserve items
+        S-->>W: Reserved
+    else card declined
+        P-->>W: Declined
+        W--xC: Payment failed
+    end
+    Note over W,P: All calls are idempotent
+    W-->>-C: Order confirmed
+```
+````
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor C as Customer
+    participant W as Web app
+    participant P as Payments
+    participant S as Stock service
+    C->>+W: Checkout
+    W->>P: Authorise card
+    alt card approved
+        P-->>W: Approved
+        W->>S: Reserve items
+        S-->>W: Reserved
+    else card declined
+        P-->>W: Declined
+        W--xC: Payment failed
+    end
+    Note over W,P: All calls are idempotent
+    W-->>-C: Order confirmed
+```
+
+##### State
+
+`stateDiagram-v2`. States, transitions, start and end markers.
+
+````markdown
+```mermaid
+stateDiagram-v2
+    [*] --> Draft
+    Draft --> Review : submit
+    Review --> Draft : changes
+    Review --> Approved : approve
+    Approved --> [*]
+```
+````
+
+```mermaid
+stateDiagram-v2
+    [*] --> Draft
+    Draft --> Review : submit
+    Review --> Draft : changes
+    Review --> Approved : approve
+    Approved --> [*]
+```
+
+##### Entity-relationship
+
+`erDiagram`. Entities with keys and crow's-foot relationships.
+
+````markdown
+```mermaid
+erDiagram
+    CUSTOMER ||--o{ ORDER : places
+    ORDER ||--|{ LINE_ITEM : contains
+    PRODUCT ||--o{ LINE_ITEM : "appears in"
+    CUSTOMER {
+        string id PK
+        string name
+        string email
+    }
+    ORDER {
+        int id PK
+        string customer_id FK
+        date placed
+    }
+    LINE_ITEM {
+        int order_id PK,FK
+        string sku FK
+        int quantity
+    }
+```
+````
+
+```mermaid
+erDiagram
+    CUSTOMER ||--o{ ORDER : places
+    ORDER ||--|{ LINE_ITEM : contains
+    PRODUCT ||--o{ LINE_ITEM : "appears in"
+    CUSTOMER {
+        string id PK
+        string name
+        string email
+    }
+    ORDER {
+        int id PK
+        string customer_id FK
+        date placed
+    }
+    LINE_ITEM {
+        int order_id PK,FK
+        string sku FK
+        int quantity
+    }
+```
+
+##### Mind map
+
+`mindmap`. One colour per branch, balanced either side of the root.
+
+````markdown
+```mermaid
+mindmap
+  root((Strategy))
+    Growth
+      New markets
+      Partnerships
+    Efficiency
+      Automation
+      Cost review
+    People
+      Hiring
+      Training
+```
+````
+
+```mermaid
+mindmap
+  root((Strategy))
+    Growth
+      New markets
+      Partnerships
+    Efficiency
+      Automation
+      Cost review
+    People
+      Hiring
+      Training
+```
+
+##### Timeline
+
+`timeline`. Periods with one or more events.
+
+````markdown
+```mermaid
+timeline
+    title Company history
+    section Early days
+    2021 : Founded
+    2022 : First customer : Seed round
+    section Growth
+    2023 : Series A
+    2024 : 100 staff
+```
+````
+
+```mermaid
+timeline
+    title Company history
+    section Early days
+    2021 : Founded
+    2022 : First customer : Seed round
+    section Growth
+    2023 : Series A
+    2024 : 100 staff
+```
+
+##### Gantt
+
+`gantt`. Sections, task tags, dependencies; bars take the series palette.
+
+````markdown
+```mermaid
+gantt
+    title Launch plan
+    dateFormat YYYY-MM-DD
+    section Design
+    Research   :done, a1, 2026-01-05, 14d
+    Wireframes :active, after a1, 10d
+    section Build
+    Backend    :b1, 2026-01-26, 30d
+    Frontend   :crit, 2026-02-09, 25d
+    Launch     :milestone, 2026-03-10, 0d
+```
+````
+
+```mermaid
+gantt
+    title Launch plan
+    dateFormat YYYY-MM-DD
+    section Design
+    Research   :done, a1, 2026-01-05, 14d
+    Wireframes :active, after a1, 10d
+    section Build
+    Backend    :b1, 2026-01-26, 30d
+    Frontend   :crit, 2026-02-09, 25d
+    Launch     :milestone, 2026-03-10, 0d
+```
+
+##### Pie
+
+`pie`. Slices in the series palette, with a percentage legend.
+
+````markdown
+```mermaid
+pie title Revenue by region
+    "North" : 42
+    "South" : 23
+    "East" : 18
+    "West" : 11
+    "Other markets" : 6
+```
+````
+
+```mermaid
+pie title Revenue by region
+    "North" : 42
+    "South" : 23
+    "East" : 18
+    "West" : 11
+    "Other markets" : 6
+```
+
+##### Donut
+
+`donut`. The same data as a pie, with a total in the centre.
+
+````markdown
+```mermaid
+donut showData
+    "Done" : 64
+    "In progress" : 24
+    "Blocked" : 12
+```
+````
+
+```mermaid
+donut showData
+    "Done" : 64
+    "In progress" : 24
+    "Blocked" : 12
+```
+
+##### Bar and line
+
+`xychart-beta`. Bar and line series on round-number axes.
+
+````markdown
+```mermaid
+xychart-beta
+    title "Quarterly revenue"
+    x-axis [Q1, Q2, Q3, Q4]
+    y-axis "Revenue ($K)"
+    bar [120, 145, 160, 190]
+    line [110, 140, 150, 170]
+```
+````
+
+```mermaid
+xychart-beta
+    title "Quarterly revenue"
+    x-axis [Q1, Q2, Q3, Q4]
+    y-axis "Revenue ($K)"
+    bar [120, 145, 160, 190]
+    line [110, 140, 150, 170]
+```
+
+##### Gauge
+
+`gauge`. A single value on a dial.
+
+````markdown
+```mermaid
+gauge
+    title Customer satisfaction
+    value: 72
+    max: 100
+```
+````
+
+```mermaid
+gauge
+    title Customer satisfaction
+    value: 72
+    max: 100
+```
+
+##### Class
+
+`classDiagram`. Members, visibility, relationships and cardinalities.
+
+````markdown
+```mermaid
+classDiagram
+    class Animal {
+        <<abstract>>
+        +String name
+        -int age
+        +makeSound()* void
+        +getCount()$ int
+    }
+    class Duck {
+        +swim()
+        +quack()
+    }
+    class Fish {
+        -int sizeInFeet
+        -canEat()
+    }
+    class Pond {
+        +List~Duck~ ducks
+    }
+    Animal <|-- Duck
+    Animal <|-- Fish
+    Pond "1" *-- "many" Duck : contains
+    Duck ..> Fish : eats
+```
+````
+
+```mermaid
+classDiagram
+    class Animal {
+        <<abstract>>
+        +String name
+        -int age
+        +makeSound()* void
+        +getCount()$ int
+    }
+    class Duck {
+        +swim()
+        +quack()
+    }
+    class Fish {
+        -int sizeInFeet
+        -canEat()
+    }
+    class Pond {
+        +List~Duck~ ducks
+    }
+    Animal <|-- Duck
+    Animal <|-- Fish
+    Pond "1" *-- "many" Duck : contains
+    Duck ..> Fish : eats
+```
+
+##### User journey
+
+`journey`. Task scores drawn as a satisfaction curve.
+
+````markdown
+```mermaid
+journey
+    title My working day
+    section Go to work
+      Make tea: 5: Me
+      Go upstairs: 3: Me
+      Do work: 1: Me, Cat
+    section Go home
+      Go downstairs: 5: Me
+      Sit down: 4: Me, Cat
+```
+````
+
+```mermaid
+journey
+    title My working day
+    section Go to work
+      Make tea: 5: Me
+      Go upstairs: 3: Me
+      Do work: 1: Me, Cat
+    section Go home
+      Go downstairs: 5: Me
+      Sit down: 4: Me, Cat
+```
+
+##### Git graph
+
+`gitGraph`. Branches, commits, merges, tags.
+
+````markdown
+```mermaid
+gitGraph
+    commit id: "init"
+    commit
+    branch develop
+    checkout develop
+    commit id: "feature-a"
+    branch feature
+    checkout feature
+    commit id: "wip" type: HIGHLIGHT
+    checkout main
+    merge develop tag: "v1.0"
+    checkout feature
+    commit
+    checkout develop
+    merge feature
+    checkout main
+    commit tag: "v1.1"
+```
+````
+
+```mermaid
+gitGraph
+    commit id: "init"
+    commit
+    branch develop
+    checkout develop
+    commit id: "feature-a"
+    branch feature
+    checkout feature
+    commit id: "wip" type: HIGHLIGHT
+    checkout main
+    merge develop tag: "v1.0"
+    checkout feature
+    commit
+    checkout develop
+    merge feature
+    checkout main
+    commit tag: "v1.1"
+```
+
+##### Dark diagram
+
+`%%{init: {'theme':'dark'}}%%`. Drawn on its own dark panel so it reads on a light page.
+
+````markdown
+```mermaid
+%%{init: {'theme': 'dark'}}%%
+flowchart LR
+    A([Request]) --> B{Cached?}
+    B -->|yes| C[Serve cache]
+    B -->|no| D[Render page]
+    D --> C
+```
+````
+
+```mermaid
+%%{init: {'theme': 'dark'}}%%
+flowchart LR
+    A([Request]) --> B{Cached?}
+    B -->|yes| C[Serve cache]
+    B -->|no| D[Render page]
+    D --> C
+```
+
+##### Quadrant chart
+
+`quadrantChart`. Points on a two-axis grid with quadrant labels.
+
+````markdown
+```mermaid
+quadrantChart
+    title Reach and engagement of campaigns
+    x-axis Low Reach --> High Reach
+    y-axis Low Engagement --> High Engagement
+    quadrant-1 We should expand
+    quadrant-2 Need to promote
+    quadrant-3 Re-evaluate
+    quadrant-4 May be improved
+    Campaign A: [0.3, 0.6]
+    Campaign B: [0.45, 0.23]
+    Campaign C: [0.57, 0.69]
+    Campaign D: [0.78, 0.34]
+    Campaign E: [0.40, 0.34]
+    Campaign F:::hot: [0.35, 0.78]
+    classDef hot color: #d03b3b, radius : 7
+```
+````
+
+```mermaid
+quadrantChart
+    title Reach and engagement of campaigns
+    x-axis Low Reach --> High Reach
+    y-axis Low Engagement --> High Engagement
+    quadrant-1 We should expand
+    quadrant-2 Need to promote
+    quadrant-3 Re-evaluate
+    quadrant-4 May be improved
+    Campaign A: [0.3, 0.6]
+    Campaign B: [0.45, 0.23]
+    Campaign C: [0.57, 0.69]
+    Campaign D: [0.78, 0.34]
+    Campaign E: [0.40, 0.34]
+    Campaign F:::hot: [0.35, 0.78]
+    classDef hot color: #d03b3b, radius : 7
+```
+
+##### Sankey
+
+`sankey`. Flow quantities as ribbons.
+
+````markdown
+```mermaid
+sankey
+Electricity grid,Heating and cooling - homes,113.726
+Electricity grid,Industry,342.165
+Electricity grid,Losses,56.691
+Wind,Electricity grid,289.366
+Solar,Electricity grid,59.901
+Nuclear,Electricity grid,839.978
+Gas,Electricity grid,26.861
+Gas,Industry,46.477
+Electricity grid,"Heating and cooling, commercial",88.14
+```
+````
+
+```mermaid
+sankey
+Electricity grid,Heating and cooling - homes,113.726
+Electricity grid,Industry,342.165
+Electricity grid,Losses,56.691
+Wind,Electricity grid,289.366
+Solar,Electricity grid,59.901
+Nuclear,Electricity grid,839.978
+Gas,Electricity grid,26.861
+Gas,Industry,46.477
+Electricity grid,"Heating and cooling, commercial",88.14
+```
+
+##### Radar
+
+`radar-beta`. Several curves over shared axes.
+
+````markdown
+```mermaid
+radar-beta
+  title Restaurant comparison
+  axis food["Food"], service["Service"], price["Price"]
+  axis ambiance["Ambiance"], wait["Wait time"]
+  curve a["Restaurant A"]{4, 3, 2, 4, 3}
+  curve b["Restaurant B"]{3, 4, 3, 3, 5}
+  max 5
+```
+````
+
+```mermaid
+radar-beta
+  title Restaurant comparison
+  axis food["Food"], service["Service"], price["Price"]
+  axis ambiance["Ambiance"], wait["Wait time"]
+  curve a["Restaurant A"]{4, 3, 2, 4, 3}
+  curve b["Restaurant B"]{3, 4, 3, 3, 5}
+  max 5
+```
+
+##### Treemap
+
+`treemap-beta`. Nested areas sized by value.
+
+````markdown
+```mermaid
+treemap-beta
+"Products"
+    "Electronics"
+        "Phones": 50
+        "Computers": 30
+        "Accessories": 20
+    "Clothing"
+        "Men's": 40
+        "Women's": 40
+"Services"
+    "Support": 35
+    "Training": 15
+```
+````
+
+```mermaid
+treemap-beta
+"Products"
+    "Electronics"
+        "Phones": 50
+        "Computers": 30
+        "Accessories": 20
+    "Clothing"
+        "Men's": 40
+        "Women's": 40
+"Services"
+    "Support": 35
+    "Training": 15
+```
+
+##### Packet
+
+`packet`. Bit-level protocol layouts.
+
+````markdown
+```mermaid
+---
+title: "TCP Packet"
+---
+packet
+0-15: "Source Port"
+16-31: "Destination Port"
+32-63: "Sequence Number"
+64-95: "Acknowledgment Number"
+96-99: "Data Offset"
+100-105: "Reserved"
+106: "URG"
+107: "ACK"
+108: "PSH"
+109: "RST"
+110: "SYN"
+111: "FIN"
+112-127: "Window"
+128-143: "Checksum"
+144-159: "Urgent Pointer"
+160-191: "(Options and Padding)"
+192-255: "Data (variable length)"
+```
+````
+
+```mermaid
+---
+title: "TCP Packet"
+---
+packet
+0-15: "Source Port"
+16-31: "Destination Port"
+32-63: "Sequence Number"
+64-95: "Acknowledgment Number"
+96-99: "Data Offset"
+100-105: "Reserved"
+106: "URG"
+107: "ACK"
+108: "PSH"
+109: "RST"
+110: "SYN"
+111: "FIN"
+112-127: "Window"
+128-143: "Checksum"
+144-159: "Urgent Pointer"
+160-191: "(Options and Padding)"
+192-255: "Data (variable length)"
+```
+
+##### Block
+
+`block`. A grid of blocks with spans, arrows and links.
+
+````markdown
+```mermaid
+block
+columns 1
+  db(("DB"))
+  blockArrowId6(down)
+  block:ID
+    A
+    B["A wide one in the middle"]
+    C
+  end
+  space
+  D
+  ID --> D
+  C --> D
+  style B fill:#e8eefc,stroke:#3c5aa8
+```
+````
+
+```mermaid
+block
+columns 1
+  db(("DB"))
+  blockArrowId6(down)
+  block:ID
+    A
+    B["A wide one in the middle"]
+    C
+  end
+  space
+  D
+  ID --> D
+  C --> D
+  style B fill:#e8eefc,stroke:#3c5aa8
+```
+
+##### Kanban
+
+`kanban`. Columns of tickets with metadata.
+
+````markdown
+```mermaid
+kanban
+  Todo
+    [Create Documentation]
+    docs[Create Blog about the new diagram]
+  [In progress]
+    id6[Create renderer so that it works in all cases]@{ priority: 'High' }
+  id9[Ready for deploy]
+    id8[Design grammar]@{ assigned: 'knsv' }
+  id10[Ready for test]
+    id4[Create parsing tests]@{ ticket: MC-2038, assigned: 'K.Sveidqvist', priority: 'High' }
+    id66[last item]@{ priority: 'Very Low', assigned: 'knsv' }
+  id11[Done]
+    id5[define getData]
+    id2[Title of diagram is more than 100 chars]@{ ticket: MC-2036, priority: 'Very High'}
+```
+````
+
+```mermaid
+kanban
+  Todo
+    [Create Documentation]
+    docs[Create Blog about the new diagram]
+  [In progress]
+    id6[Create renderer so that it works in all cases]@{ priority: 'High' }
+  id9[Ready for deploy]
+    id8[Design grammar]@{ assigned: 'knsv' }
+  id10[Ready for test]
+    id4[Create parsing tests]@{ ticket: MC-2038, assigned: 'K.Sveidqvist', priority: 'High' }
+    id66[last item]@{ priority: 'Very Low', assigned: 'knsv' }
+  id11[Done]
+    id5[define getData]
+    id2[Title of diagram is more than 100 chars]@{ ticket: MC-2036, priority: 'Very High'}
+```
+
+##### Architecture
+
+`architecture-beta`. Groups, services and directional connections.
+
+````markdown
+```mermaid
+architecture-beta
+    group api(cloud)[API]
+    service db(database)[Database] in api
+    service disk1(disk)[Storage] in api
+    service disk2(disk)[Storage] in api
+    service server(server)[Server] in api
+    service web(internet)[Internet]
+    db:L -- R:server
+    disk1:T -- B:server
+    disk2:T -- B:db
+    web:R --> L:server
+```
+````
+
+```mermaid
+architecture-beta
+    group api(cloud)[API]
+    service db(database)[Database] in api
+    service disk1(disk)[Storage] in api
+    service disk2(disk)[Storage] in api
+    service server(server)[Server] in api
+    service web(internet)[Internet]
+    db:L -- R:server
+    disk1:T -- B:server
+    disk2:T -- B:db
+    web:R --> L:server
+```
+
+##### C4 container
+
+`C4Container`. People, systems, containers and relationships in C4 roles.
+
+````markdown
+```mermaid
+C4Container
+    title Container diagram for Internet Banking System
+    System_Ext(email_system, "E-Mail System", "The internal Microsoft Exchange system")
+    Person(customer, Customer, "A customer of the bank, with personal bank accounts")
+    Container_Boundary(c1, "Internet Banking") {
+        Container(spa, "Single-Page App", "JavaScript, Angular", "Provides all the Internet banking functionality to customers via their web browser")
+        Container_Ext(mobile_app, "Mobile App", "C#, Xamarin", "Provides a limited subset of the Internet banking functionality")
+        Container(web_app, "Web Application", "Java, Spring MVC", "Delivers the static content and the SPA")
+        ContainerDb(database, "Database", "SQL Database", "Stores user registration information, hashed credentials, access logs")
+        ContainerDb_Ext(backend_api, "API Application", "Java, Docker Container", "Provides Internet banking functionality via API")
+    }
+    System_Ext(banking_system, "Mainframe Banking System", "Stores all of the core banking information")
+    Rel(customer, web_app, "Uses", "HTTPS")
+    Rel(customer, spa, "Uses", "HTTPS")
+    Rel(customer, mobile_app, "Uses")
+    Rel_Back(database, backend_api, "Reads from and writes to", "sync, JDBC")
+    Rel(email_system, customer, "Sends e-mails to")
+    Rel(backend_api, email_system, "Sends e-mails using", "sync, SMTP")
+    Rel(backend_api, banking_system, "Uses", "sync/async, XML/HTTPS")
+    UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
+```
+````
+
+```mermaid
+C4Container
+    title Container diagram for Internet Banking System
+    System_Ext(email_system, "E-Mail System", "The internal Microsoft Exchange system")
+    Person(customer, Customer, "A customer of the bank, with personal bank accounts")
+    Container_Boundary(c1, "Internet Banking") {
+        Container(spa, "Single-Page App", "JavaScript, Angular", "Provides all the Internet banking functionality to customers via their web browser")
+        Container_Ext(mobile_app, "Mobile App", "C#, Xamarin", "Provides a limited subset of the Internet banking functionality")
+        Container(web_app, "Web Application", "Java, Spring MVC", "Delivers the static content and the SPA")
+        ContainerDb(database, "Database", "SQL Database", "Stores user registration information, hashed credentials, access logs")
+        ContainerDb_Ext(backend_api, "API Application", "Java, Docker Container", "Provides Internet banking functionality via API")
+    }
+    System_Ext(banking_system, "Mainframe Banking System", "Stores all of the core banking information")
+    Rel(customer, web_app, "Uses", "HTTPS")
+    Rel(customer, spa, "Uses", "HTTPS")
+    Rel(customer, mobile_app, "Uses")
+    Rel_Back(database, backend_api, "Reads from and writes to", "sync, JDBC")
+    Rel(email_system, customer, "Sends e-mails to")
+    Rel(backend_api, email_system, "Sends e-mails using", "sync, SMTP")
+    Rel(backend_api, banking_system, "Uses", "sync/async, XML/HTTPS")
+    UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
+```
+
+##### Requirement
+
+`requirementDiagram`. Requirements, elements and typed relations.
+
+````markdown
+```mermaid
+requirementDiagram
+  requirement checkout_req {
+    id: 1
+    text: Orders must be payable online.
+    risk: high
+    verifymethod: test
+  }
+  functionalRequirement payment_req {
+    id: 1.1
+    text: Card payments must be authorised.
+    risk: high
+    verifymethod: test
+  }
+  element checkout_service {
+    type: service
+    docref: docs/checkout.md
+  }
+  checkout_req - contains -> payment_req
+  checkout_service - satisfies -> payment_req
+```
+````
+
+```mermaid
+requirementDiagram
+  requirement checkout_req {
+    id: 1
+    text: Orders must be payable online.
+    risk: high
+    verifymethod: test
+  }
+  functionalRequirement payment_req {
+    id: 1.1
+    text: Card payments must be authorised.
+    risk: high
+    verifymethod: test
+  }
+  element checkout_service {
+    type: service
+    docref: docs/checkout.md
+  }
+  checkout_req - contains -> payment_req
+  checkout_service - satisfies -> payment_req
+```
+
+##### ZenUML
+
+`zenuml`. Call-style sequence notation.
+
+````markdown
+```mermaid
+zenuml
+    title Order service
+    @Actor Client
+    @Database DB
+    Client->OrderService.create(order) {
+      valid = Validator.check(order)
+      if(valid) {
+        DB.save(order)
+        return id
+      } else {
+        @return
+        OrderService->Client: rejected
+      }
+    }
+    par {
+      OrderService->Email: confirmation
+      OrderService->Analytics: track
+    }
+```
+````
+
+```mermaid
+zenuml
+    title Order service
+    @Actor Client
+    @Database DB
+    Client->OrderService.create(order) {
+      valid = Validator.check(order)
+      if(valid) {
+        DB.save(order)
+        return id
+      } else {
+        @return
+        OrderService->Client: rejected
+      }
+    }
+    par {
+      OrderService->Email: confirmation
+      OrderService->Analytics: track
+    }
+```
+
+##### Use case
+
+`usecase-beta`. Actors, use cases, boundaries, includes and extends.
+
+````markdown
+```mermaid
+usecase-beta
+direction LR
+actor Customer
+actor Support
+systemBoundary Storefront
+  Browse("Browse catalogue")
+  Checkout("Checkout")
+end
+systemBoundary Fulfilment
+  Track("Track delivery")
+end
+Customer --> Browse
+Customer --> Checkout
+Customer --> Track
+Support --> Track
+Checkout ..> : include Browse
+```
+````
+
+```mermaid
+usecase-beta
+direction LR
+actor Customer
+actor Support
+systemBoundary Storefront
+  Browse("Browse catalogue")
+  Checkout("Checkout")
+end
+systemBoundary Fulfilment
+  Track("Track delivery")
+end
+Customer --> Browse
+Customer --> Checkout
+Customer --> Track
+Support --> Track
+Checkout ..> : include Browse
+```
+
+##### Swimlanes
+
+`swimlane-beta`. A flow split into lanes by owner.
+
+````markdown
+```mermaid
+swimlane-beta LR
+  subgraph Customer
+    request[Request service]
+    receive[Receive update]
+  end
+  subgraph Support
+    triage[Triage request]
+    answer[Send answer]
+  end
+  subgraph Engineering
+    investigate[Investigate issue]
+    fix[Prepare fix]
+  end
+  request --> triage
+  triage -->|Known issue| answer
+  triage -->|Needs code| investigate
+  investigate --> fix --> answer
+  answer --> receive
+```
+````
+
+```mermaid
+swimlane-beta LR
+  subgraph Customer
+    request[Request service]
+    receive[Receive update]
+  end
+  subgraph Support
+    triage[Triage request]
+    answer[Send answer]
+  end
+  subgraph Engineering
+    investigate[Investigate issue]
+    fix[Prepare fix]
+  end
+  request --> triage
+  triage -->|Known issue| answer
+  triage -->|Needs code| investigate
+  investigate --> fix --> answer
+  answer --> receive
+```
+
+##### Agent flow
+
+`agentflow-beta`. Agents, tools and failure paths.
+
+````markdown
+```mermaid
+agentflow-beta TB
+  brief@{ shape: input, label: "Release brief" }
+  flow drafting["Drafting Agent"]
+    draft@{ shape: task, label: "Draft the notes" }
+    search@{ shape: tool, label: "changelog_search" }
+    tone@{ shape: refdoc, label: "Tone of voice" }
+    draft --> search
+    draft -.-> tone
+  end
+  flow review["Review Agent"]
+    check@{ shape: task, label: "Check the claims" }
+    ok@{ shape: decision, label: "Accurate?" }
+    check --> ok
+  end
+  publish@{ shape: action, label: "Publish" }
+  brief --> draft
+  tone --> check
+  ok -->|yes| publish
+  ok --x|no| draft
+```
+````
+
+```mermaid
+agentflow-beta TB
+  brief@{ shape: input, label: "Release brief" }
+  flow drafting["Drafting Agent"]
+    draft@{ shape: task, label: "Draft the notes" }
+    search@{ shape: tool, label: "changelog_search" }
+    tone@{ shape: refdoc, label: "Tone of voice" }
+    draft --> search
+    draft -.-> tone
+  end
+  flow review["Review Agent"]
+    check@{ shape: task, label: "Check the claims" }
+    ok@{ shape: decision, label: "Accurate?" }
+    check --> ok
+  end
+  publish@{ shape: action, label: "Publish" }
+  brief --> draft
+  tone --> check
+  ok -->|yes| publish
+  ok --x|no| draft
+```
+
+##### Tree view
+
+`treeView-beta`. Folder trees with notes and highlights.
+
+````markdown
+```mermaid
+treeView-beta
+src/
+  App.tsx :::highlight ## main component
+  index.ts ## entry point
+  components/
+    Button.tsx
+    Card.tsx
+.env ## environment variables
+package.json
+```
+````
+
+```mermaid
+treeView-beta
+src/
+  App.tsx :::highlight ## main component
+  index.ts ## entry point
+  components/
+    Button.tsx
+    Card.tsx
+.env ## environment variables
+package.json
+```
+
+##### Ishikawa
+
+`ishikawa-beta`. Cause-and-effect fishbone.
+
+````markdown
+```mermaid
+ishikawa-beta
+Blurry photo
+  Process
+    Out of focus
+    Shutter speed too slow
+  Equipment
+    Lens
+      Dirty lens
+    Sensor
+  User
+    Shaky hands
+  Environment
+    Too dark
+    Subject moved
+```
+````
+
+```mermaid
+ishikawa-beta
+Blurry photo
+  Process
+    Out of focus
+    Shutter speed too slow
+  Equipment
+    Lens
+      Dirty lens
+    Sensor
+  User
+    Shaky hands
+  Environment
+    Too dark
+    Subject moved
+```
+
+##### Venn
+
+`venn-beta`. Overlapping sets with sized unions.
+
+````markdown
+```mermaid
+venn-beta
+  title What makes a good feature
+  set Desirable
+  set Feasible
+  set Viable
+  union Desirable,Feasible["Buildable"]
+  union Feasible,Viable["Sustainable"]
+  union Desirable,Viable["Marketable"]
+  union Desirable,Feasible,Viable["Ship it"]
+```
+````
+
+```mermaid
+venn-beta
+  title What makes a good feature
+  set Desirable
+  set Feasible
+  set Viable
+  union Desirable,Feasible["Buildable"]
+  union Feasible,Viable["Sustainable"]
+  union Desirable,Viable["Marketable"]
+  union Desirable,Feasible,Viable["Ship it"]
+```
+
+##### Cynefin
+
+`cynefin-beta`. The five domains with transitions.
+
+````markdown
+```mermaid
+cynefin-beta
+  title Incident response
+  complex
+    "Investigate root cause"
+    "Run chaos experiment"
+  complicated
+    "Analyse performance data"
+  clear
+    "Restart service"
+    "Apply known fix"
+  chaotic
+    "Page on-call immediately"
+  confusion
+    "Unknown failure mode"
+  chaotic --> complex : "Stabilised"
+  complex --> complicated : "Pattern found"
+```
+````
+
+```mermaid
+cynefin-beta
+  title Incident response
+  complex
+    "Investigate root cause"
+    "Run chaos experiment"
+  complicated
+    "Analyse performance data"
+  clear
+    "Restart service"
+    "Apply known fix"
+  chaotic
+    "Page on-call immediately"
+  confusion
+    "Unknown failure mode"
+  chaotic --> complex : "Stabilised"
+  complex --> complicated : "Pattern found"
+```
+
+##### Wardley map
+
+`wardley-beta`. Components by visibility and evolution.
+
+````markdown
+```mermaid
+wardley-beta
+title Tea shop value chain
+anchor Business [0.95, 0.63]
+component Cup of Tea [0.79, 0.61]
+component Tea [0.63, 0.81]
+component Hot Water [0.52, 0.80]
+component Kettle [0.43, 0.35] (build)
+component Power [0.10, 0.70] (outsource)
+Business -> Cup of Tea
+Cup of Tea -> Tea
+Cup of Tea -> Hot Water
+Hot Water -> Kettle
+Kettle -> Power
+evolve Kettle 0.62
+note "Standard power lets kettles evolve" [0.28, 0.40]
+```
+````
+
+```mermaid
+wardley-beta
+title Tea shop value chain
+anchor Business [0.95, 0.63]
+component Cup of Tea [0.79, 0.61]
+component Tea [0.63, 0.81]
+component Hot Water [0.52, 0.80]
+component Kettle [0.43, 0.35] (build)
+component Power [0.10, 0.70] (outsource)
+Business -> Cup of Tea
+Cup of Tea -> Tea
+Cup of Tea -> Hot Water
+Hot Water -> Kettle
+Kettle -> Power
+evolve Kettle 0.62
+note "Standard power lets kettles evolve" [0.28, 0.40]
+```
+
+##### Railroad
+
+`railroad-ebnf-beta`. Syntax rules drawn as tracks.
+
+````markdown
+```mermaid
+railroad-ebnf-beta
+title "Arithmetic expressions"
+expression = term ( ( "+" | "-" ) term )* ;
+term = factor ( ( "*" | "/" ) factor )* ;
+factor = number | "(" expression ")" ;
+number = digit+ ;
+```
+````
+
+```mermaid
+railroad-ebnf-beta
+title "Arithmetic expressions"
+expression = term ( ( "+" | "-" ) term )* ;
+term = factor ( ( "*" | "/" ) factor )* ;
+factor = number | "(" expression ")" ;
+number = digit+ ;
+```
+
+##### Event modeling
+
+`eventmodeling`. Frames across UI, command, event and read-model lanes.
+
+````markdown
+```mermaid
+eventmodeling
+tf 01 ui CartUI
+tf 02 cmd AddItem { description: string, price: number }
+tf 03 evt ItemAdded
+tf 04 rmo CartItems ->> 03
+tf 05 ui CartUI
+rf 06 evt External.InventoryChanged
+tf 07 pcr InventoryProcessor
+tf 08 cmd ChangeInventory
+tf 09 evt Cart.InventoryChanged
+```
+````
+
+```mermaid
+eventmodeling
+tf 01 ui CartUI
+tf 02 cmd AddItem { description: string, price: number }
+tf 03 evt ItemAdded
+tf 04 rmo CartItems ->> 03
+tf 05 ui CartUI
+rf 06 evt External.InventoryChanged
+tf 07 pcr InventoryProcessor
+tf 08 cmd ChangeInventory
+tf 09 evt Cart.InventoryChanged
+```
 
 <a id="markdown-values-and-placeholders"></a>
 
@@ -938,13 +2849,397 @@ Keep labels short. Examples of every type are in
 |--------|---------|-------|
 | `{{ variable }}` | Filled in at build time from `_meta.yml` or frontmatter | all formats |
 | `{% include "name.md" %}` | Insert a shared fragment from a `templates/` folder | all formats |
+| `{% if %}`, `{% for %}`, `{% set %}`, `{% macro %}` | Conditions, loops, variables and reusable blocks, resolved at build time | all formats; see [Logic in templates](#markdown-logic-in-templates) |
 | `[[field]]` | Word merge or form field, declared in `_merge_fields.yml` | `.dotx` |
 | `?[type: name]` | Fillable PDF field | `pdf_forms: true` PDF; Word forms in `.dotx` |
 | `<!-- notes: … -->`, `<!-- slide … -->` | Speaker notes and slide layouts | `pptx` |
 
 `{{ }}` supports Jinja2 filters (`{{ status | upper }}`, `{{ x | default("n/a") }}`). Fragment
 lookup order: the document's folder, a local `templates/`, ancestor `templates/` folders
-(deepest first), then the repo-root `templates/`.
+(deepest first), then the repo-root `templates/`. The first match wins, except for macro
+libraries, which are layered (see [Macros](#markdown-logic-macros)).
+
+<a id="markdown-logic-in-templates"></a>
+
+### Logic in templates (Jinja2)
+
+The body of every document is a [Jinja2](https://jinja.palletsprojects.com/) template. It is
+rendered once, at build time, with every key of the [config cascade](#configuration) as a
+variable, and the result is what the PDF, Word and slide builders see. So a document can show
+or hide sections, repeat rows, compute totals and share building blocks without any scripting.
+
+```markdown
+{% if tier == "gold" %}Gold terms apply for {{ client }}.{% endif %}
+
+{% for item in items %}
+- {{ loop.index }}. {{ item | upper }}
+{% endfor %}
+```
+
+This page covers what works, how to write it, and the few places that surprise people. For plain
+`{{ variable }}` and `{% include %}` see [Values and placeholders](#markdown-values-and-placeholders).
+
+<a id="markdown-logic-variables"></a>
+
+#### Where variables come from
+
+Every key in the merged config is available by name: your own keys (`client`, `tier`, `rates`),
+and the built-in ones (`title`, `status`, `author`, `version`, `outputs`, ...). The cascade is the
+usual one: repo root `_meta.yml`, then each folder's `_meta.yml` down to the document, then the
+document's frontmatter, with the deepest value winning.
+
+```yaml
+# workspace/acme/_meta.yml
+client: Acme Pty Ltd
+tier: gold
+rates:
+  gold:   {setup: 500, monthly: 90}
+  silver: {setup: 250, monthly: 60}
+team:
+  - {name: Ann, role: Lead,      days: 10, active: true}
+  - {name: Bob, role: Developer, days: 20, active: true}
+  - {name: Cy,  role: Analyst,   days: 5,  active: false}
+```
+
+Things to know about the data:
+
+- **Merging is shallow.** A key in a deeper file *replaces* the shallower value completely. A
+  folder that sets `team: [...]` does not add to the parent's `team`, it overrides it. Likewise
+  a document that sets `rates:` loses the parent's other rates.
+- **YAML types apply.** Numbers and booleans arrive as numbers and booleans, so `days * rate`
+  works. Be careful with words YAML reads as booleans: `extra: yes` or `on` becomes `True`.
+  Quote a string you mean literally (`extra: "yes"`).
+- **Frontmatter values are templated too**, but separately: any string value containing `{{`
+  (for example `title: "Proposal for {{ client }}"`) is rendered against the config before the
+  builders use it, and an unknown name is left as `{{ name }}` rather than becoming empty. The
+  frontmatter block is copied into the document untouched; only the body is rendered as a
+  template, so put logic in the body.
+- **Includes and macros see them too.** A fragment, an included file and an imported macro all
+  read the variables of the document that uses them, so shared templates automatically pick up
+  the values of the folder the document lives in (see [Macros](#markdown-logic-macros)).
+- **Fillable fields are not variables.** `[[field]]` (Word merge and form fields) and `?[...]`
+  (PDF form fields) are left alone by Jinja; they are filled in later, by whoever opens the file.
+
+<a id="markdown-logic-conditions"></a>
+
+#### Conditions
+
+```markdown
+{% if status == "final" %}
+This version is approved.
+{% elif status in ["draft", "review"] %}
+**Not final** ({{ status }}).
+{% else %}
+Status unknown.
+{% endif %}
+```
+
+- Comparisons: `==`, `!=`, `<`, `>`, `<=`, `>=`. Combine with `and`, `or`, `not`, and group with
+  parentheses.
+- Membership: `"pdf" in outputs`, `tier in ["gold", "silver"]`.
+- Presence: `{% if contact is defined %}`, `{% if contact is none %}`, `{% if team %}` (a list is
+  true when it has items). Other tests include `is string`, `is number`, `is even`, `is odd`.
+- One-liners: `{{ "Gold" if tier == "gold" else "Standard" }}` and
+  `{% set discount = 20 if tier == "gold" else 5 %}`.
+
+Branches can wrap anything, including whole tables, headings, `{% include %}` lines and
+`<!-- pagebreak -->`:
+
+```markdown
+{% if tier == "gold" %}
+{% include "gold-perks.md" %}
+{% endif %}
+```
+
+<a id="markdown-logic-loops"></a>
+
+#### Loops
+
+```markdown
+{% for p in team if p.active %}
+- {{ p.name }}, {{ p.role }}
+{% endfor %}
+```
+
+- Filter inside the loop header with `if` (above), or sort first: `{% for p in team | sort(attribute="days") %}`.
+- Inside a loop: `loop.index` (from 1), `loop.index0`, `loop.first`, `loop.last`, `loop.length`.
+- Dictionaries: `{% for name, rate in rates.items() %}`.
+- `{% else %}` after the body runs when there was nothing to loop over.
+- `range` makes counters: `{% for n in range(1, 4) %}`.
+
+**Building a table.** Put the header and separator rows outside the loop and one row inside it,
+all on lines of their own so each row is its own line:
+
+```markdown
+| Name | Role | Days |
+| --- | --- | ---: |
+{% for p in team %}
+| {{ p.name }} | {{ p.role }} | {{ p.days }} |
+{% endfor %}
+```
+
+<a id="markdown-logic-variables-set"></a>
+
+#### Setting variables and totals
+
+`{% set %}` creates a variable for the rest of the template:
+
+```markdown
+{% set rate = rates[tier] %}
+Setup is ${{ rate.setup }} and the monthly fee is ${{ rate.monthly }}.
+```
+
+A `set` *inside* a loop is local to that pass, so it cannot add up a total. Use a `namespace`:
+
+```markdown
+{% set total = namespace(value=0) %}
+{% for p in team if p.active %}
+{% set total.value = total.value + p.days * day_rate %}
+{% endfor %}
+Total: ${{ "{:,}".format(total.value) }}
+```
+
+For simple sums a filter is shorter: `{{ team | sum(attribute="days") }}`.
+
+<a id="markdown-logic-filters"></a>
+
+#### Filters
+
+A filter transforms a value: `{{ value | filter(arguments) }}`, and they chain left to right.
+
+- `default`: `{{ phone | default("n/a") }}` prints the value, or `n/a` when it is missing.
+- `upper`, `lower`, `title`: change case, `{{ client | lower }}`.
+- `replace`: `{{ client | replace("Pty", "Proprietary") }}` substitutes text.
+- `join`: `{{ items | join(", ") }}` gives `Alpha, Beta, Gamma`.
+- `length`: `{{ team | length }}` is the number of items.
+- `sum`: `{{ team | sum(attribute="days") }}` adds up one field (`35`).
+- `sort`, `first`, `last`: `{{ team | sort(attribute="days") | map(attribute="name") | first }}`
+  is the name with the fewest days.
+- `map`, `selectattr`: `{{ team | selectattr("active") | map(attribute="name") | join(", ") }}`
+  gives `Ann, Bob`.
+- `round`: `{{ 3.14159 | round(2) }}` gives `3.14`.
+- `format`: `{{ "%.2f" | format(price) }}` gives `1234.50`, and `{{ "{:,}".format(1234567) }}` gives
+  `1,234,567`.
+- `trim`, `truncate`: `{{ summary | truncate(80) }}` shortens long text.
+
+The other built-in Jinja2 filters work too. There is no way to add your own filters or functions.
+
+<a id="markdown-logic-macros"></a>
+
+#### Macros: shared building blocks that follow the folder they are used in
+
+A macro is a small template you call like a function. Define your common macros once, in a
+`macros.md` under a `templates/` folder, and import them wherever you need them:
+
+```markdown
+<!-- templates/macros.md -->
+{% macro badge(text, level="info") %}**[{{ level | upper }}]** {{ text }}{% endmacro %}
+{% macro sign_off(name) %}Regards, {{ name }}, {{ client }}{% endmacro %}
+```
+
+```markdown
+{% from "macros.md" import badge, sign_off %}
+{{ badge("Check the totals", "warn") }}
+{{ sign_off("Greg") }}
+```
+
+That prints `**[WARN]** Check the totals` and `Regards, Greg, Acme Pty Ltd`.
+
+**Variables come from where the document is.** Inside a macro, `{{ client }}` and every other
+config value is the one resolved for the *document that uses it*: its frontmatter, its folder's
+`_meta.yml`, then each parent folder's. The same `sign_off` macro prints "Acme" in
+`workspace/acme/` and "Blueshift" in `workspace/blueshift/`, with no copy of the macro and no
+arguments to pass. Two limits:
+
+- A macro argument with the same name as a variable wins inside the macro
+  (`{% macro m(client) %}` uses the argument).
+- Variables the *document itself* creates, with `{% set %}` or a loop, are not visible inside an
+  imported macro. Pass them as arguments, or import with
+  `{% from "macros.md" import badge with context %}`.
+
+**Macro files layer down the folders.** Put the common macros at the top and let any folder add
+to them or replace single ones. For a file named `macros.md`, or ending `-macros.md` or
+`_macros.md` (for example `legal-macros.md`), *every* copy found along the usual lookup path is
+combined, shallowest first, so a macro defined in a deeper file replaces the shared macro of the
+same name and every other shared macro is still available:
+
+```
+templates/macros.md                      sign_off, badge          (shared by everyone)
+workspace/acme/templates/macros.md       badge                    (Acme's own version)
+workspace/acme/proposals/templates/macros.md   extra              (only for proposals)
+```
+
+A document in `workspace/acme/proposals/` can import `sign_off` (from the top), `badge` (Acme's
+version) and `extra` with a single `{% from "macros.md" import sign_off, badge, extra %}`. A
+document in another client's folder gets the shared `sign_off` and `badge`. Ordinary fragments
+(anything not named like a macro library) are not layered: the deepest file replaces the shared
+one, as described in [Values and placeholders](#markdown-values-and-placeholders).
+
+Because the layers are joined into one file before it is read, a line number in an error from a
+macro file counts across all the layers. Keep each layer small and the message names the macro.
+
+<a id="markdown-logic-includes"></a>
+
+#### Includes with logic
+
+A fragment pulled in with `{% include %}` shares the current variables, including loop
+variables, so it can be used inside loops and conditions. The lookup order is the one described
+in [Values and placeholders](#markdown-values-and-placeholders).
+
+```markdown
+{% include "terms-" ~ region ~ ".md" %}              {# terms-au.md or terms-nz.md #}
+{% include "optional-appendix.md" ignore missing %}  {# no error if the file is absent #}
+```
+
+`~` joins strings. Choosing a fragment from a variable is the usual way to vary clauses by
+region, product or customer tier without copying the document.
+
+<a id="markdown-logic-whitespace"></a>
+
+#### Comments, whitespace and blank lines
+
+- `{# like this #}` is a comment and produces nothing.
+- The renderer already removes the line a `{% ... %}` tag sits on, so tags on their own lines do
+  not leave blank lines behind. Add a minus sign to strip more: `{%- if x %}` removes the space
+  before the tag and `{% endif -%}` the space after it.
+- Markdown still needs its blank lines. Keep a blank line between a paragraph and a table, and
+  between list items you want separated, whether or not they come from a loop.
+
+<a id="markdown-logic-literal-braces"></a>
+
+#### Showing Jinja syntax and literal braces
+
+Jinja runs **everywhere in the body, including fenced code blocks and inline code.** Text such as
+`{{ client }}` in a code sample is replaced by the client name unless you escape it. Print the
+delimiters from a string expression:
+
+| To print | Write |
+|----------|-------|
+| `{{` and `}}` | `{{ '{{' }}` and `{{ '}}' }}` |
+| `{%` and `%}` | `{{ '{%' }}` and `{{ '%}' }}` |
+| `{#` | `{{ '{#' }}` |
+
+so a code sample showing a variable is written:
+
+````markdown
+```jinja
+{{ '{{' }} client {{ '}}' }}
+```
+````
+
+and renders as `{{ client }}`. For a longer passage, a **raw block** is easier: open it with the
+`raw` tag and close it with the matching `endraw` tag, and everything between is copied through
+untouched. (This handbook is wrapped in one, which is why its examples appear as written.) Raw
+blocks cannot be nested, and the closing tag cannot appear inside one, so use the string form
+above to show the raw tags themselves.
+
+Two other places bite:
+
+- **Heading anchors.** `## Scope {#scope}` fails with *Missing end of comment tag*, because
+  `{#` starts a Jinja comment. Write `## Scope {{ '{#scope}' }}`, or leave the explicit id off
+  (headings get automatic anchors).
+- **LaTeX and other brace-heavy text.** A `{%` or `{{` inside maths or code will be read as
+  Jinja. Escape it as above, or wrap the passage in a raw block.
+
+<a id="markdown-logic-errors"></a>
+
+#### Missing values and errors
+
+| Situation | Normal build | `--strict` build, `lint --render` |
+|-----------|--------------|-----------------------------------|
+| `{{ missing }}` | blank | error: `'missing' is undefined` |
+| `{% if missing %}` | false | error |
+| `{% if missing is defined %}` | false | false (no error) |
+| `{{ team[5].name }}` where item 5 does not exist | error | error |
+| Unclosed `{% if %}` or a stray `{#` | error | error |
+
+A `default` filter avoids the error in both modes: `{{ missing | default("x") }}` prints `x`.
+
+Reading a *property of something missing* is an error even in a normal build, so guard it with
+`is defined`, or loop instead of indexing.
+
+`md-doc lint` reports Jinja syntax errors, unresolved `{{ variables }}` (a warning), and
+unresolvable `{% include %}` targets; add `--render` to also run a strict render of every
+document, which turns every blank-where-a-value-should-be into a visible error:
+
+```bash
+uv run md-doc lint workspace/acme/ --render
+uv run md-doc build workspace/acme/ --strict
+```
+
+<a id="markdown-logic-limits"></a>
+
+#### What logic cannot do
+
+- **It runs at build time, once.** The output is fixed text. A `.dotx` cannot branch on a
+  `[[field]]` when someone fills it in, because Word has no knowledge of the template. Choose
+  the branch from `_meta.yml` or frontmatter, and build one template per variant if the variants
+  differ (for example one folder per customer type, each with its own `_meta.yml`).
+- **The template does not know which format it is being built for.** The same rendered text
+  goes to every builder; `outputs` lists the formats the document declares, not the one running.
+  Use [`<!-- pagebreak -->`, section breaks and the format differences](#markdown-differences-between-formats)
+  for layout, or keep separate documents for content that must differ per format.
+- **It is sandboxed.** Templates cannot read files, run commands or reach Python internals
+  (names starting with an underscore are blocked), so a document from someone else cannot run
+  code on your machine. Plain data, filters, macros and includes are unaffected.
+- **Loops produce text, not structure.** To change layout per row (page breaks, landscape
+  sections), emit the marker comments from inside the loop:
+  `{% if loop.index % 10 == 0 %}<!-- pagebreak -->{% endif %}`.
+
+<a id="markdown-logic-example"></a>
+
+#### Worked example: a tiered proposal
+
+`workspace/acme/_meta.yml` as above, plus `day_rate: 800` and `region: au`, with fragments
+`templates/gold-perks.md`, `templates/terms-au.md` and `templates/terms-nz.md`:
+
+```markdown
+---
+title: "Proposal for {{ client }}"
+status: draft
+---
+# Proposal for {{ client }}
+
+{% if tier == "gold" %}
+{% include "gold-perks.md" %}
+{% endif %}
+{% set rate = rates[tier] %}
+Setup is ${{ "{:,}".format(rate.setup) }} and the monthly fee is ${{ rate.monthly }}.
+
+| Name | Role | Days | Cost |
+| --- | --- | ---: | ---: |
+{% set total = namespace(value=0) %}
+{% for p in team if p.active %}
+| {{ p.name }} | {{ p.role }} | {{ p.days }} | ${{ "{:,}".format(p.days * day_rate) }} |
+{% set total.value = total.value + p.days * day_rate %}
+{% endfor %}
+| **Total** | | | **${{ "{:,}".format(total.value) }}** |
+
+{% if contact is none %}Contact to be confirmed.{% else %}Contact: {{ contact }}.{% endif %}
+
+{% include "terms-" ~ region ~ ".md" %}
+```
+
+With `tier: gold` and `region: au` this builds to:
+
+```markdown
+# Proposal for Acme Pty Ltd
+
+Gold perks: priority support, quarterly review.
+Setup is $500 and the monthly fee is $90.
+
+| Name | Role | Days | Cost |
+| --- | --- | ---: | ---: |
+| Ann | Lead | 10 | $8,000 |
+| Bob | Developer | 20 | $16,000 |
+| **Total** | | | **$24,000** |
+
+Contact to be confirmed.
+Governed by Australian law.
+```
+
+Change `tier` to `silver` in a customer folder's `_meta.yml` and the perks vanish and the prices
+change; set `region: nz` and the terms switch. Cy is skipped because `active` is false.
 
 <a id="markdown-differences-between-formats"></a>
 
@@ -1851,12 +4146,63 @@ asset cascade and becomes `url("file://…")`.
 
 ### What the theme colours also drive
 
-- **Mermaid diagrams** take their colours from the theme as hex literals: primary from
-  `.cover-title { color }`, else `h1 { color }`, else `th { background }`; accent from `h2`,
-  `a` or `.cover-label`; muted from `h3` or `em`; text from `body`.
+- **Mermaid diagrams** take their colours from the theme; see
+  [Diagram colours in the theme](#themes-diagram-colours) for what is read and how to control it.
 - **PDF form grids** use the same primary colour (see [Forms](#themes-forms)).
 
-`var(--x)`, `rgb()` and named colours are not read for these. Use hex literals.
+<a id="themes-diagram-colours"></a>
+
+### Diagram colours in the theme
+
+Mermaid diagrams are drawn from the theme CSS the PDF builder uses, and Word and PowerPoint use
+that same theme, so a diagram has the same colours in every format. Nothing needs configuring:
+a branded theme gives branded diagrams. To control them, describe the palette in the theme.
+
+**What is read.** Where a theme has several layers (a client theme that `@import`s the brand
+theme), the declaration that comes last wins, so a client override changes its diagrams too. A
+colour can be hex, `rgb()`, `hsl()`, a name such as `crimson`, or `var(--your-variable)`.
+
+| Diagram colour | Read from, in order |
+|----------------|---------------------|
+| Primary (start and end shapes, ER headers, first series) | `--mddoc-diagram-primary`, else the last of `.cover-title { color }`, `h1 { color }` and `th { background }` |
+| Accent (decisions, second series) | `--mddoc-diagram-accent`, else the last of `h2`, `a` and `.cover-label` `{ color }` |
+| Text | `--mddoc-diagram-text`, else `body { color }` |
+| Muted text | `--mddoc-diagram-muted`, else `h3` or `em` `{ color }` |
+| Font | `--mddoc-diagram-font`, else `body { font-family }` |
+| Surface and mode | `--mddoc-diagram-surface` and `--mddoc-diagram-mode: light \| dark`, else a dark `body` or `@page` background switches to dark mode |
+
+Card fills, borders, edges and frames are tints derived from the primary and accent, so
+changing those two recolours the whole diagram.
+
+**Chart series.** Pie, donut, bar, Gantt, mind map, class, user journey, quadrant, Sankey, radar, tree view,
+Ishikawa and Venn diagrams colour their series from eight slots. By default the slots are the primary
+colour, the accent colour, then the built-in colour-blind-safe colours that stay clearly
+different from those two (and from each other). Set `--mddoc-diagram-palette` to choose the
+series yourself:
+
+```css
+:root {
+  /* the brand, and what diagrams should use */
+  --brand: #7a1f5c;
+  --brand-2: #0f766e;
+
+  --mddoc-diagram-primary: var(--brand);
+  --mddoc-diagram-accent: var(--brand-2);
+  --mddoc-diagram-text: #1f2328;
+  --mddoc-diagram-font: "Inter", sans-serif;
+
+  /* series 1..8, in order (fewer than eight are topped up from the built-in colours) */
+  --mddoc-diagram-palette: var(--brand), var(--brand-2), #d97706, #2563eb, #9ca3af;
+}
+```
+
+- `--mddoc-diagram-palette: default` keeps the built-in palette whatever the brand colours are.
+- The listed colours are used exactly as written, so pick ones that are distinguishable for
+  colour-blind readers and that suit the surface. In dark mode the primary and accent are lifted
+  until they read on the dark surface, but an explicit palette is not changed.
+- Put these properties in the shared `_theme.css` so the PDF, Word and PowerPoint builds agree.
+- A diagram's own `themeVariables` (`primaryColor`, `secondaryColor`, ...) still override the
+  theme for that one diagram.
 
 <a id="themes-page-setup"></a>
 
@@ -2029,6 +4375,11 @@ run does not label samples pass or fail; it is a review aid.
 - **`.section-note` and other class-based styles** in a theme are not translated to Word.
 - **Renderer artifacts.** LibreOffice keeps heading space-before at automatic page breaks (Word
   and the PDF drop it); this shows up only when checking with LibreOffice.
+- **Review marks.** `review_markup: show` gives real tracked changes and comments in Word but
+  coloured text and comment footnotes in the PDF; `simple` draws a margin bar in the PDF and a
+  right-hand paragraph border in Word (Word draws its own change bars only for real tracked
+  changes), with table rows marked at the table edge in Word;
+  slides never show them.
 - **PDF-only features.** Bookmarks, PDF/A/UA/X variants, embedded files, numbered headings,
   page-bottom footnotes, `<!-- columns -->` and `<!-- grid -->` blocks, duplex pages, chapter
   breaks, print marks and bleed have no Word equivalent; Word flows the content normally (see
@@ -3162,6 +5513,8 @@ override shallower ones. Lengths are CSS lengths (`mm`, `pt`, `cm`, `in`, `px`).
 | `status` | string | — | `draft`, `final` or `superseded`; shown in the register. |
 | `outputs` | list | `[pdf]` | Formats to build: `pdf`, `docx`, `dotx`, `pptx`. |
 | `output_filename` | string | source name | Output file name for every format; Jinja2 allowed; extension added. |
+| `imported_from` | string | — | Informational: the file this document was imported from (set by the editor import; builders ignore it). |
+| `imported_on` | string | — | Informational: the date of that import, `YYYY-MM-DD` (quote it). |
 | `output_dir` | string | next to source | Directory for outputs, mirroring the source tree; `--output` wins. |
 | `pdf_forms` | boolean | `false` | Interactive PDF form fields; output gets a `-form` suffix. |
 | `include_md_in_share` | boolean | `false` | Include `.md` sources when syncing. |
@@ -3169,7 +5522,7 @@ override shallower ones. Lengths are CSS lengths (`mm`, `pt`, `cm`, `in`, `px`).
 | `dotx_field_type` | enum | `form` | `form` (fillable Word fields) or `merge` (MERGEFIELDs). |
 | `body_text_align` | enum | theme | Word body alignment: `justify`, `left`, `center`, `right`. |
 | `preserve_blank_lines` | boolean | `true` | Each blank line beyond the first adds one line of vertical space (PDF/Word); `false` collapses them like plain Markdown. Code blocks are untouched. |
-| `preserve_line_breaks` | boolean | `false` | Keep single line breaks inside a paragraph or list item as line breaks (PDF/Word); off, Markdown joins them with a space (end a line with two spaces for one break). |
+| `preserve_line_breaks` | boolean | `false` | Keep single line breaks inside a paragraph or list item as line breaks (PDF/Word); off, Markdown joins them with a space (end a line with a backslash or two spaces for one break). |
 | `table_col_widths` | list | auto | Relative column widths for every table, e.g. `[30, 70]`; per table use `<!-- col-widths: 30, 70 -->`. |
 | `css_vars` | mapping | — | PDF only: per-document CSS custom properties; image paths resolved by the asset cascade. |
 | `pptx_template` | string | built-in | `.pptx`/`.potx` base for slide output. |
@@ -3274,6 +5627,9 @@ override shallower ones. Lengths are CSS lengths (`mm`, `pt`, `cm`, `in`, `px`).
 | `image_resolution` | string | — | Intrinsic image resolution, e.g. `150dpi`, `2x` or `from-image`. |
 | `print_marks` | enum | — | Printer's marks: `crop`, `cross` or `crop cross`. |
 | `bleed` | length | — | Bleed beyond the trim edge, e.g. `3mm`. |
+| `review_markup` | enum | `accept` | What a build does with CriticMarkup review marks: `accept` every change, `reject` every change, `show` them (PDF colours and comment footnotes, Word tracked changes and comments), `simple` (final text with change bars, highlights and comments), or `hybrid` (final text with a light highlight and bars, the changes and comments written out in a margin column). |
+| `review_author` | string | `Reviewer` | Author name on Word tracked changes and comments (`show` and `simple` modes). |
+| `review_exports` | list | — | Build several review versions at once, one file each: `clean`, `original`, `simple`, `hybrid`, `markup` (alias `full`). Files get a `-clean`, `-original`, `-simple`, `-hybrid` or `-markup` suffix. |
 | `sync_target` | enum | — | `azure`, `s3` or `local`. |
 | `sync_config` | mapping | — | Backend settings; `${NAME}` is replaced from the environment. |
 | `export` | boolean | `false` | Mark a note for `md-doc export` (inheritable from `_meta.yml`). |
@@ -3322,10 +5678,11 @@ Place these **before** the subcommand: `md-doc --debug build workspace/`.
 | [`build`](#commands-build) | Build Markdown documents to PDF, DOCX, DOTX and/or PPTX. |
 | [`lint`](#commands-lint) | Check documents for build errors without rendering. |
 | [`fields`](#commands-fields) | List the `[[merge fields]]` available at a folder. |
+| [`refactor`](#commands-refactor) | Move text repeated across documents into a shared template. |
 | [`new`](#commands-new) | Scaffold a folder or a document. |
 | [`theme`](#commands-theme) | Create a brand theme or a colour override. |
 | [`export`](#commands-export) | Build only notes marked `export: true` and collect the outputs. |
-| [`extract`](#commands-extract) | Convert a PDF or DOCX back to Markdown. |
+| [`extract`](#commands-extract) | Convert Word, PowerPoint, Excel, HTML or PDF back to Markdown. |
 | [`sync`](#commands-sync) | Upload built files to Azure, S3 or a local folder. |
 | [`register`](#commands-register) | Write a document register (JSON, Markdown, CSV). |
 | [`workspaces`](#commands-workspaces) | List named remote workspaces. |
@@ -3352,6 +5709,7 @@ Builds every document under `ROOT` (default: the current directory) to the forma
 | `--no-lint` | Skip the pre-flight lint (to build anyway while iterating). |
 | `--dry-run` | Print what would be built without building. |
 | `--force` | Rebuild everything. By default a document is skipped when its outputs are newer than its source, config, theme, templates and the md-doc code itself. |
+| `--review [accept\|reject\|show\|simple\|hybrid]` | What to do with CriticMarkup review marks for this build, overriding `review_markup` and `review_exports` (see [review markup](#markdown-review-markup)). |
 | `-j, --jobs N` | Build up to N documents in parallel (process pool). Default 1. |
 | `-v, --verbose` | Print full tracebacks on errors. |
 
@@ -3378,7 +5736,8 @@ Checks, without invoking WeasyPrint: frontmatter YAML is valid; `outputs` are re
 formats; Jinja2 syntax is valid; `{{ variables }}` (body and frontmatter strings) exist in the
 config cascade (warning); `{% include %}` targets resolve (error); `[[fields]]` exist in the
 `_merge_fields.yml` cascade (warning, when a schema is present); config keys are known and well
-typed; PDF form fields have valid types and unique names. Exits non-zero on errors; warnings do
+typed; PDF form fields have valid types and unique names; CriticMarkup marks are closed, and a
+`status: final` document has none left (warning). Exits non-zero on errors; warnings do
 not affect the exit code.
 
 | Option | Description |
@@ -3459,9 +5818,40 @@ the [export guide](#exporting) for the frontmatter keys and destination rules.
 md-doc extract FILE_PATH [--dest DESTINATION] [--force]
 ```
 
-Converts a PDF or DOCX to Markdown, written to `DESTINATION` (default `templates/`) with the
+Converts a Word, PowerPoint, Excel, HTML or PDF file to Markdown, written to `DESTINATION` (default `templates/`) with the
 source name and a `.md` extension. `--force` overwrites without prompting. See the
 [extraction guide](#extracting).
+
+<a id="commands-refactor"></a>
+
+### refactor
+
+```
+md-doc refactor [DIRECTORY] [options]
+```
+
+Finds sections that appear word for word in several documents under `DIRECTORY` (a company
+profile, an "about us" blurb, legal wording) and moves them into a shared template. Text is
+compared block by block (paragraph, list, table, fenced code) after collapsing whitespace, and the
+longest shared run of blocks is claimed first. Files starting with `_` and `templates/` folders are
+skipped as sources, but their fragments are compared with the documents: text that duplicates an
+existing template (even in a single document) is reported as matching it, and `--apply` replaces
+it with an include of that template without creating a new file. Without `--apply` it only reports.
+
+With `--apply`, each section is saved as a fragment in a `templates/` folder next to the
+documents' closest shared parent folder (named after its first heading) and every copy is replaced
+by `{% include "name.md" %}`. Every affected document is rendered before and after; if any output
+differs, all files are restored. Only identical text matches, so make the varying part a
+`{{ variable }}` first. See [`{% include %}`](#authoring--include----template-fragments).
+The web editor has the same tool in its **Shared content** panel. There you can also pick a higher `templates/` folder for the template, and hide matches you don't want to be shown again.
+
+| Option | Description |
+|--------|-------------|
+| `-w, --workspace NAME` | Scan a named remote workspace. Overrides `DIRECTORY`. |
+| `--min-docs N` | Only report text found in at least `N` documents. Default: 2. |
+| `--min-chars N` | Ignore shared text shorter than `N` characters. Default: 80. |
+| `--templates-dir DIRECTORY` | Write fragments here instead of a `templates/` folder beside the documents. |
+| `--apply` | Write the fragments and replace the repeated text. |
 
 <a id="commands-sync"></a>
 
@@ -3649,7 +6039,7 @@ See the [CLI reference](#commands) for every option and the
 
 ## Extracting
 
-The `md-doc extract` command converts PDF and DOCX files to Markdown snippets, perfect for:
+The `md-doc extract` command converts Word, PowerPoint, Excel, HTML and PDF files to Markdown snippets, perfect for:
 - Extracting reusable content from external documents
 - Converting proposals into template fragments
 - Breaking down multi-page contracts into manageable sections
@@ -3664,6 +6054,22 @@ The `md-doc extract` command converts PDF and DOCX files to Markdown snippets, p
 ```bash
 md-doc extract <FILE> [OPTIONS]
 ```
+
+Word tracked changes and comments in a `.docx` come out as [review markup](#markdown-review-markup)
+(`{++added++}`, `{--deleted--}`, `{~~old~>new~~}`, `{==text==}{>>comment<<}`), so a reviewed
+document keeps its edits.
+
+<a id="extracting-merge-fields"></a>
+
+#### Merge fields come back as `[[fields]]`
+
+Extracting a `.docx` or `.dotx` reverses what the `.dotx` builder does: Word merge fields
+(`MERGEFIELD`), text form fields (`FORMTEXT`, named in the field's properties) and plain-text
+content controls (named by their tag, else their title) come out as `[[field_name]]`, ready
+to rebuild as a fillable `.dotx`. Names with spaces become underscores (`First Name` →
+`First_Name`). A form field with no name, and checkbox, dropdown and date controls, stay as
+the text Word shows. `md-doc extract` lists the fields it found, and the editor can add them to
+`_merge_fields.yml` (see [Importing in the web editor](#extracting-importing-in-the-web-editor)).
 
 <a id="extracting-minimal-example"></a>
 
@@ -3753,8 +6159,11 @@ md-doc extract contract-template.docx --dest workspace/acme/legal/
 | Format | Supported | Notes |
 |---|---|---|
 | **PDF** | ✅ Yes | Text extraction; images and complex layouts convert to text descriptions |
-| **DOCX** | ✅ Yes | Full content including tables, lists, formatting |
-| **Other** | ❌ No | Only PDF and DOCX are supported |
+| **DOCX / DOTX** | ✅ Yes | Full content including tables, lists, formatting; merge fields, form fields, tracked changes and comments are kept |
+| **PPTX** | ✅ Yes | One section per slide; the starter frontmatter sets `slide_split: h1` |
+| **XLSX** | ✅ Yes | Sheets become tables. Needs the optional extra: `uv sync --extra xlsx` |
+| **HTML** | ✅ Yes | Headings, lists, tables and links |
+| **Other** | ❌ No | Convert RTF, ODT and similar to one of the formats above first |
 
 ---
 
@@ -3810,15 +6219,52 @@ md-doc extract report.pdf --dest workspace/acme/reports/
 
 <a id="extracting-future-interactive-extraction-ui"></a>
 
-### Future: Interactive Extraction UI
+<a id="extracting-importing-in-the-web-editor"></a>
 
-A Phase 2 feature will add an interactive extraction tool with:
-- Point-and-click file picker
-- Real-time Markdown preview
-- Destination folder browser
-- Snippet management (save, edit, organize)
+### Importing in the web editor
 
-For now, use the CLI command.
+Importing has no dialogs. Pick files and they are converted and saved straight away with the
+same converter as `md-doc extract`; the first one opens in the editor and a toast reports what
+happened, with an **Undo**. Start an import any of these ways:
+
+- the upload button above the file tree,
+- **right-click a folder** (or the workspace root) → **Import documents here**,
+- **drag files onto a folder** in the tree,
+- the command palette (`Ctrl K`) → **Import documents**.
+
+To put the converted text into the document you are editing instead, use the command palette →
+**Import into this document**, or drop the files onto the editor. It is inserted at the cursor
+(`Ctrl Z` undoes it).
+
+**Where it goes:** new documents land in the folder you last clicked in the file tree (it is
+highlighted), or in the open document's folder if you opened a file more recently. The same
+folder is used by the **+** button (a menu of report, fillable form, slide deck and blank
+document; it creates `untitled.md`, or the next free name, and opens it) and the folder
+right-click menu (**New … here**).
+
+**Name clashes:** a file name that is already taken gets the next free one (`client-letter-2.md`)
+and the toast says so. Nothing is overwritten.
+
+**Undo** moves everything the import wrote (documents, images, a newly created
+`_merge_fields.yml`) to `.editor-trash`. Lines appended to an existing `_merge_fields.yml` stay.
+
+What each import adds is set under **Settings → When importing documents**; all three are on by
+default:
+
+- **Starter frontmatter** (new documents): `title` and `output_filename` from the source file
+  name, so rebuilding gives `Client Proposal.dotx` again rather than a slugged name;
+  `imported_from` and `imported_on` record the source file name and the date (a browser
+  never reveals the folder a file came from, so only the name is recorded); plus `outputs`
+  for the kind of file (`[pdf, docx]`; `[dotx]` with `dotx_field_type: form` for a template or
+  anything with merge fields; `[pptx]` with `slide_split: h1` for a deck). The new file name
+  itself comes from the source name, lower-cased with hyphens.
+- **Images** embedded in a Word file are saved into an `assets/` folder next to the document
+  and linked with relative paths. A numeric suffix avoids overwriting existing images.
+- **Merge fields** found in a Word file are added to `_merge_fields.yml` in the document's
+  folder (created if missing). Fields already described there are left alone.
+
+PDF conversion is approximate, especially for tables and multi-column layouts, so check the
+result in the editor.
 
 ---
 
@@ -3831,7 +6277,7 @@ For now, use the CLI command.
 - Use absolute paths if relative paths don't work
 
 **"Unsupported file type"**
-- Only `.pdf` and `.docx` files are supported
+- Supported: `.docx`, `.dotx`, `.pptx`, `.xlsx`, `.html`, `.htm` and `.pdf`
 - Convert other formats (RTF, ODT, etc.) to one of these first
 
 **Extracted Markdown looks wrong**
@@ -3901,6 +6347,20 @@ uv sync --extra mermaid   # + libcairo2 on Linux
 
 Without it, diagrams still work in PDF; in Word they fall back to a code block
 rather than breaking the build. PDF diagrams never require `cairosvg`.
+
+<a id="troubleshooting-chart-blocks-show-as-source-code"></a>
+
+### Chart blocks show as source code
+
+`chart`, `vega-lite` and `vega` blocks are drawn with the optional `vl-convert-python`
+dependency:
+
+```bash
+uv sync --extra charts
+```
+
+The build log names the problem when a spec is invalid (for example a missing data file) and
+leaves that one block as code.
 
 <a id="troubleshooting-s3--azure-sync-says-the-backend-isnt-available"></a>
 

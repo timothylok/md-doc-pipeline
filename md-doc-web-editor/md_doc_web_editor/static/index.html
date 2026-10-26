@@ -57,6 +57,7 @@
           </button>
         </div>
       </header>
+      <input type="file" id="import-file-input" multiple hidden>
       <div class="workbench" id="workbench">
         <nav class="activity-rail" aria-label="Workspace tools">
           <button
@@ -80,6 +81,13 @@
             aria-label="Document outline"
           >
             <span data-icon="list"></span></button
+          ><button
+            class="rail-button"
+            data-nav="shared"
+            title="Shared content"
+            aria-label="Shared content"
+          >
+            <span data-icon="layers"></span></button
           ><button
             class="rail-button"
             data-nav="git"
@@ -119,6 +127,13 @@
                 aria-label="New document"
               >
                 <span data-icon="file-plus"></span></button
+              ><button
+                class="icon-button small"
+                data-action="import"
+                title="Import documents"
+                aria-label="Import documents"
+              >
+                <span data-icon="upload"></span></button
               ><button
                 class="icon-button small"
                 data-action="refresh-tree"
@@ -183,6 +198,7 @@
             <div id="search-results"></div>
           </div>
           <div class="sidebar-content" id="outline-panel" hidden></div>
+          <div class="sidebar-content" id="shared-panel" hidden></div>
           <div class="sidebar-content" id="git-panel" hidden></div>
           <div class="sidebar-footer">
             <span data-icon="shield"></span
@@ -329,7 +345,9 @@
               <button class="button primary" data-action="open-sample">
                 <span data-icon="file"></span>Open a sample</button
               ><button class="button ghost" data-action="new">
-                <span data-icon="plus"></span>Create a document
+                <span data-icon="plus"></span>Create a document</button
+              ><button class="button ghost" data-action="import">
+                <span data-icon="upload"></span>Import documents
               </button>
               <div class="welcome-shortcuts">
                 <span><kbd>Ctrl P</kbd> Quick open</span
@@ -645,6 +663,7 @@
     <script src="/static/vendor/marked-17.0.5/marked.umd.js"></script>
     <script src="/static/vendor/monaco-editor-0.52.2/min/vs/loader.js"></script>
     <script src="/static/tokenizers.js"></script>
+    <script src="/static/chart-wizard.js"></script>
     <script src="/static/composition.js"></script>
     <script src="/static/editor.js" defer></script>
   </body>

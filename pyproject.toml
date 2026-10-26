@@ -27,7 +27,7 @@ dependencies = [
     "python-docx>=1.1.2",
     "markdown>=3.5",
     "click>=8.1",
-    "markitdown[pdf,docx]>=0.1.0",
+    "markitdown[pdf,docx,pptx]>=0.1.0",
     "python-pptx>=1.0",
     "pymdown-extensions>=10.0",
     "ziamath>=0.13",
@@ -41,6 +41,13 @@ s3 = ["boto3>=1.34"]
 # Rasterizes Mermaid diagrams to PNG for embedding in .docx/.dotx output so
 # Word documents show diagrams (not source) like the PDF builder does.
 mermaid = ["cairosvg>=2.7"]
+# Excel (.xlsx) import in `md-doc extract` and the web editor (pulls in pandas).
+xlsx = ["markitdown[xlsx]>=0.1.0"]
+# Vega-Lite charts from ```chart blocks. Keep in step with the presentation framework's
+# vega / vega-lite / vega-embed versions (vl-convert 1.9 = Vega 6.2, Vega-Lite 6.4).
+charts = [
+    "vl-convert-python>=1.9,<2",
+]
 
 [project.urls]
 Homepage = "https://github.com/gregshallardau/md-doc-pipeline"
@@ -85,6 +92,10 @@ dev = [
     "types-pyyaml>=6.0.12.20260408",
     "types-markdown>=3.10.2.20260408",
 ]
+
+# A plain `uv sync` keeps the browser editor installed (it is otherwise removed).
+[tool.uv]
+default-groups = ["dev", "editor"]
 
 [tool.uv.sources]
 md-doc-web-editor = { path = "md-doc-web-editor", editable = true }

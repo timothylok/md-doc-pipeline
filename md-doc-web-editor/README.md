@@ -24,7 +24,7 @@ With no directory, the editor discovers local folders under `workspace/` and the
 
 An available configured remote workspace is opened before local samples. Its configured `path` is used exactly; relative paths resolve from the project directory. The header identifies remote workspaces and the explorer displays the full directory path. **Choose document folder** lets you explicitly open a nested folder without changing the configuration or guessing where documents live.
 
-The Files rail button toggles the sidebar. Click the workspace row to collapse its files, or use **Expand all / Collapse all** for folders. New sessions open the first two folder levels; folder badges count Markdown documents recursively. PDFs, Office outputs, images and authoring files appear alongside Markdown. PDF/image files open in a browser tab and Office files download. **Dark mode / Light mode** is available directly in the header.
+The Files rail button toggles the sidebar. Click the workspace row to collapse its files, or use **Expand all / Collapse all** for folders. New sessions open the first two folder levels; folder badges count Markdown documents recursively. When the workspace has any `templates/` folder, the tree splits into **Documents** and **Templates** areas. Each has a collapsible, sticky heading with a count; **Only** (shown on hover) collapses the other area so you see just that one, and **Show all** brings both back. Templates keep their folder path, so you can see which level each `templates/` folder belongs to, and the file filter searches both areas. The choice is remembered per browser. PDFs, Office outputs, images and authoring files appear alongside Markdown. PDF/image files open in a browser tab and Office files download. **Dark mode / Light mode** is available directly in the header.
 
 In Source mode, click a `{% include "fragment.md" %}` line (or press **Alt+Enter**) to expand its source directly into the main editor. Multiple and nested templates share the document's font, background, cursor, selection and scrolling. Click an expanded include again to collapse it, or use **Collapse templates** to collapse them all. The source indicator identifies the file under the cursor; **Save source** saves that file, and the main **Save** button / **Ctrl+S** saves changed sources in the expanded document. Template drafts stay separate from the parent source and update the final document's PDF without writing to disk. Collapsing keeps drafts. Selections crossing file boundaries cannot be changed in one edit; collapse templates to change an include declaration.
 
@@ -65,7 +65,7 @@ uv run --offline --no-sync md-doc-edit serve workspace/
 uv run --offline --no-sync md-doc-edit serve workspace/acme/ --port 9000
 ```
 
-Add `--no-browser` to start only the server. The editor and pipeline must be installed in the same Python environment. Include `--group editor` in subsequent `uv sync` commands to keep the editor installed. Installation needs internet access or a populated package cache; running the installed editor does not.
+Add `--no-browser` to start only the server. The editor and pipeline must be installed in the same Python environment. In this repository a plain `uv sync` keeps the editor installed (`default-groups` in `pyproject.toml`); if you pass `--no-default-groups`, include `--group editor` to keep it. Installation needs internet access or a populated package cache; running the installed editor does not.
 
 ## Editing and preview
 
@@ -88,7 +88,7 @@ JavaScript modules and PDF.js workers are served with explicit browser-compatibl
 
 The inspector shows editable common properties, the configuration cascade and provenance, the resolved PDF theme, included templates, and documented merge fields. Simple property changes update individual frontmatter lines. Structured YAML is edited in Source to preserve its syntax. Inherited metadata, theme and template files can be opened without changing the selected document.
 
-Use the insertion toolbar for formatting, tables, fields, PDF forms, page breaks, Mermaid, includes and slide directives. The **More insert options** button opens a compact submenu beside the toolbar. Use arrow keys to choose an item, Enter to insert, or Escape/click outside to dismiss. Insert images by searching existing workspace assets or uploading a new local image; existing filenames are never silently overwritten. New document scaffolds support reports, fillable PDF forms, decks and blank documents. File actions include folder creation, duplicate, rename in place, move to a chosen folder and recoverable trash. After moving a document, review relative asset/include references; the studio preserves them as written.
+Use the insertion toolbar for formatting, tables, fields, PDF forms, page breaks, Mermaid, includes and slide directives. The **More insert options** button opens a compact submenu beside the toolbar. Use arrow keys to choose an item, Enter to insert, or Escape/click outside to dismiss. Insert images by searching existing workspace assets or uploading a new local image; existing filenames are never silently overwritten. The **+** button opens a menu of document scaffolds (report, fillable PDF form, deck, blank) and creates the document in the folder you last clicked. Right-click a folder for **Import documents here**, **New … here** and **New folder here**; right-click a file for rename, move, duplicate and recoverable trash. Menus are popups, not dialogs: arrow keys move, Enter chooses, Escape or a click elsewhere closes. Import converts and saves immediately with an Undo (see the [handbook](../docs/handbook.md#extracting-importing-in-the-web-editor)); drop files on a folder to import there, or on the editor to insert at the cursor. After moving a document, review relative asset/include references; the studio preserves them as written.
 
 Use **Check workspace** in the diagnostics panel to run the pipeline linter against the current workspace snapshot, including unsaved text buffers. Results are grouped by file and open the relevant source; missing local Markdown image files are reported with their line number. Run the check again after editing to refresh its results.
 
@@ -110,6 +110,10 @@ Save is an explicit action. Atomic, revision-checked writes detect external edit
 Drafts and session preferences are stored in this browser's local storage, scoped to the workspace path. Reloading or reopening restores drafts without writing them to disk. If the disk revision changed, review the recovered draft before saving. Private browsing, storage limits and clearing browser data can remove these drafts; save important work to disk.
 
 External file changes are checked every second while the tab is visible, and when you return to the editor. Saved files refresh automatically in source and visual mode, including expanded templates and the pinned preview. Unsaved edits are preserved without repeated warning pop-ups; if both versions changed, saving offers a comparison before overwriting the disk file. Dependency changes refresh the pinned preview.
+
+## Shared content
+
+The **Shared content** panel (layers icon in the left rail, or *Find repeated text* in the command bar) finds text that appears word for word in several documents, such as a company blurb or legal wording, and moves it into one shared template. Scan the whole workspace or the open document's folder; *Sensitivity* sets the minimum number of documents and characters. Text that already matches a fragment in a `templates/` folder (reachable from that document) is listed first under *Matches an existing template* and can be swapped for an include of it, even when it appears in only one document. Each result shows a preview; *Hide* moves a match to the *Hidden* list at the bottom of the panel so it stops coming back (it is remembered in `.editor-ignored-matches.json` in the workspace root, and *Restore* brings it back). *Review and extract…* lets you name the template, choose where it is saved (by default the closest folder the selected documents share, or any parent folder up to the workspace root, since includes only resolve from there), see the full text, and choose which documents to change (documents with unsaved edits are disabled until saved). Each chosen copy becomes `{% include "name.md" %}`. Every document is rendered before and after, and nothing is written if any output would change. Previous versions are kept in `.editor-history`, and open tabs reload automatically. It is the editor front end of `md-doc refactor`; only identical text matches, so make a varying name or date a `{{ variable }}` first.
 
 ## Source control
 
@@ -146,6 +150,7 @@ Limits: 128 MiB / 10,000 snapshot inputs, 20 MiB text files, 100 unsaved buffers
 | GET `/api/search?q=…` | Workspace text matches |
 | POST `/api/files/action` | Scaffold, duplicate, move, trash, restore |
 | POST `/api/assets` | Validated base64 raster image upload |
+| GET `/api/refactor/scan`, POST `/api/refactor/apply`, POST `/api/refactor/ignore` | Find text repeated across documents; extract a chosen run into a template (revision-checked, verified, rolled back on any output change) |
 | GET `/api/git/status`, `/api/git/diff` | Workspace source control inspection |
 | POST `/api/git/action` | Explicit stage, unstage, commit, branch or pull |
 
@@ -227,3 +232,31 @@ copies reduce the consequences; they do not provide a cross-application lock.
 Preview/export snapshots are temporary rendering inputs, not backups: jobs,
 expiry and shutdown can delete them. A displayed or downloaded output can still
 help reconstruct content when no source copy remains.
+
+## Chart wizard
+
+**Insert → Chart…** opens a four-step builder (type, data, customize, insert) for Vega-Lite and Vega
+charts: 86 chart types in 11 groups, with a searchable picker whose thumbnails are drawn from each
+chart's own sample data. Paste a table or edit the sample, pick columns and options, and it inserts a
+`chart` block at the cursor; the preview uses this document's own theme
+(`GET /api/charts/config?path=…`). The block is rendered by `md-doc build` (needs the `charts` extra) and
+is the same one the presentation framework's Markdown slides take. The full catalogue is in the
+[handbook](../docs/handbook.md#markdown-charts-catalogue).
+
+**Right-click → Edit chart…** inside a chart block (or **Insert → Edit chart at cursor**) reopens the wizard on that
+chart. The wizard reads the block itself: it recognises the upstream example the spec is, takes the table out of
+the data and finds which columns fill the example's fields, then opens on that chart type only with everything
+restored; **Update chart** replaces the block in place. Nothing is stored in the block, so a chart pasted from the
+Vega documentation or edited by hand opens the same way. The page reads the block through
+`POST /api/charts/parse` (YAML or JSON to a spec).
+
+The wizard is the shared files `static/chart-*.js` (core, one module per chart family, map lookup tables
+and the dialog), byte-identical copies of the canonical ones in the presentation framework's studio.
+`static/vendor/vega-6.2.0/` holds Vega, Vega-Lite and vega-embed (see `VERSIONS.txt`) and the two
+basemaps. `tests/test_chart_wizard.py` checks the copies against `tests/chart-wizard.sha256.json`, that
+PyYAML reads back what the wizard writes for every chart, and that md-doc's renderer draws all of them
+identically twice. To change the wizard, edit it in the presentation framework and run
+`node scripts/chart-manifest.mjs --copy <this static folder>` there, which syncs both repos.
+
+To look at the charts, `uv run python tools/chart_contact_sheet.py SPECS OUT` renders a folder of specs
+(`node scripts/chart-check.mjs --out SPECS` writes one per chart type) into contact sheets.

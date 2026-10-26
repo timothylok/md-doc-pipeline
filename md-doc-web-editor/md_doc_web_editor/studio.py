@@ -43,6 +43,12 @@ class FileAction(BaseModel):
     content: str = ""
 
 
+class ImportRequest(BaseModel):
+    name: str
+    data: str = Field(max_length=40 * 1024 * 1024)
+    images: bool = False
+
+
 class AssetRequest(BaseModel):
     path: str
     data: str = Field(max_length=15 * 1024 * 1024)
@@ -693,6 +699,49 @@ def install_studio(app, workspace, build_root, builds, write_lock):
             full.parent.mkdir(parents=True, exist_ok=True)
             full.write_bytes(raw)
         return {"path": req.path, "bytes": len(raw)}
+
+    @app.post("/api/import")
+    def import_document(req: ImportRequest):
+        """Convert an uploaded document to Markdown; nothing is written to disk."""
+        from md_doc.extractors import (
+            SUPPORTED_SUFFIXES,
+            extract_document,
+            split_embedded_images,
+            suggest_frontmatter,
+        )
+
+        suffix = Path(req.name).suffix.lower()
+        if suffix not in SUPPORTED_SUFFIXES:
+            raise HTTPException(
+                400, "Choose a Word, PowerPoint, Excel, HTML or PDF file (" + suffix + ")"
+            )
+        try:
+            raw = base64.b64decode(req.data, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise HTTPException(422, "The file could not be read") from exc
+        if len(raw) > 25 * 1024 * 1024:
+            raise HTTPException(413, "File exceeds 25 MiB")
+        magic = {".pdf": b"%PDF", ".html": None, ".htm": None}.get(suffix, b"PK\x03\x04")
+        if magic and not raw.startswith(magic):
+            raise HTTPException(422, f"This is not a valid {suffix[1:].upper()} file")
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / f"import{suffix}"
+            source.write_bytes(raw)
+            try:
+                extraction = extract_document(str(source), keep_images=req.images)
+            except Exception as exc:  # converter errors vary by format
+                raise HTTPException(422, f"Could not convert this file: {exc}") from exc
+        markdown = extraction.markdown
+        images: list[dict[str, str]] = []
+        if req.images:
+            markdown, images = split_embedded_images(markdown)
+        return {
+            "markdown": markdown,
+            "format": suffix[1:],
+            "images": images,
+            "fields": extraction.fields,
+            "frontmatter": suggest_frontmatter(req.name, extraction.fields),
+        }
 
     @app.post("/api/files/action")
     def file_action(req: FileAction):

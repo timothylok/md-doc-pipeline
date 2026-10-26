@@ -291,6 +291,79 @@ def test_asset_upload_validation_and_collision(project):
         )
 
 
+def test_import_converts_docx_without_writing(project):
+    import base64
+    import docx
+
+    document = docx.Document()
+    document.add_heading("Imported title", level=1)
+    document.add_paragraph("Body text.")
+    content = io.BytesIO()
+    document.save(content)
+    encoded = base64.b64encode(content.getvalue()).decode()
+    before = sorted(p.name for p in project.iterdir())
+    with TestClient(create_app(project)) as client:
+        result = client.post("/api/import", json={"name": "a.docx", "data": encoded})
+        assert result.status_code == 200
+        assert "# Imported title" in result.json()["markdown"]
+        assert (
+            client.post("/api/import", json={"name": "a.txt", "data": encoded}).status_code == 400
+        )
+        assert client.post("/api/import", json={"name": "a.docx", "data": "!!"}).status_code == 422
+        bad = base64.b64encode(b"not a docx").decode()
+        assert client.post("/api/import", json={"name": "a.docx", "data": bad}).status_code == 422
+    assert sorted(p.name for p in project.iterdir()) == before
+
+
+def test_import_returns_embedded_images_separately(project):
+    import base64
+    import docx
+    from PIL import Image
+
+    png = io.BytesIO()
+    Image.new("RGB", (30, 20), "red").save(png, format="PNG")
+    png.seek(0)
+    document = docx.Document()
+    document.add_paragraph("Before")
+    document.add_picture(png)
+    content = io.BytesIO()
+    document.save(content)
+    request = {"name": "a.docx", "data": base64.b64encode(content.getvalue()).decode()}
+    with TestClient(create_app(project)) as client:
+        plain = client.post("/api/import", json=request).json()
+        assert plain["images"] == []
+        result = client.post("/api/import", json={**request, "images": True}).json()
+    assert "![](import-image-1.png)" in result["markdown"]
+    assert "base64" not in result["markdown"]
+    [image] = result["images"]
+    assert image["name"] == "import-image-1.png"
+    assert base64.b64decode(image["data"]).startswith(b"\x89PNG")
+
+
+def test_import_reports_merge_fields_and_starter_frontmatter(project):
+    import base64
+    import docx
+
+    from md_doc.builders.docx import _insert_form_field
+
+    document = docx.Document()
+    _insert_form_field(document.add_paragraph("Dear "), "contact_name", 1)
+    content = io.BytesIO()
+    document.save(content)
+    data = base64.b64encode(content.getvalue()).decode()
+    with TestClient(create_app(project)) as client:
+        result = client.post("/api/import", json={"name": "Welcome Letter.dotx", "data": data})
+        assert result.status_code == 200
+        body = result.json()
+        assert "[[contact_name]]" in body["markdown"] and body["fields"] == ["contact_name"]
+        assert 'output_filename: "Welcome Letter"' in body["frontmatter"]
+        assert "outputs: [dotx]" in body["frontmatter"]
+        html = base64.b64encode(b"<h1>Page</h1><p>Text</p>").decode()
+        page = client.post("/api/import", json={"name": "p.html", "data": html})
+        assert "# Page" in page.json()["markdown"]
+        assert client.post("/api/import", json={"name": "p.exe", "data": html}).status_code == 400
+
+
 def test_cancelled_jobs_reap_worker_and_remove_snapshot(project):
     with TestClient(create_app(project)) as client:
         result = client.post("/api/preview/jobs", json={"path": "doc.md"}).json()
