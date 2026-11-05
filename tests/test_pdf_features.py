@@ -634,7 +634,8 @@ def _document(html: str):
 
 def test_stranded_heading_is_found():
     html = (
-        "<style>@page{size:100mm 100mm;margin:10mm}p{margin:0;height:70mm}h2{margin:0}</style>"
+        "<style>@page{size:100mm 100mm;margin:10mm}p{margin:0;height:70mm}"
+        "h2{margin:0;font:12px/1 sans-serif}</style>"  # fixed size: default font metrics vary by platform
         "<p>fill</p><h2>Stranded</h2><p style='break-before:page'>next</p>"
     )
     findings = pf.layout_findings(_document(html))

@@ -84,7 +84,8 @@ def test_fenced_code_with_blank_lines_stays_one_block(tmp_path):
     (tmp_path / ".git").mkdir()
     code = "```bash\nmd-doc build a/\n\nmd-doc build b/\n```\n"
     for i in range(2):
-        (tmp_path / f"d{i}.md").write_text(f"# T{i}\n\n{code}\n")
+        # write_bytes: write_text would turn "\n" into "\r\n" on Windows
+        (tmp_path / f"d{i}.md").write_bytes(f"# T{i}\n\n{code}\n".encode())
     [g] = find_shared_sections(tmp_path, min_chars=20)
     assert g.text == code
 
