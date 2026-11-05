@@ -734,6 +734,9 @@ def _build_cover(
     show_stripe = cover_cfg.get("cover_stripe", False)
     stripe_height = cover_cfg.get("cover_stripe_height", "120mm")
     stripe_width = cover_cfg.get("cover_stripe_width", "6mm")
+    stripe_color = cover_cfg.get("cover_stripe_color")
+    stripe_text = cover_cfg.get("cover_stripe_text")
+    meta_detail = cover_cfg.get("cover_meta_detail")
 
     align_class = f"cover-align-{text_align}"
 
@@ -754,7 +757,17 @@ def _build_cover(
 
     stripe_html = ""
     if show_stripe:
-        stripe_html = f'<div class="cover-stripe" style="height: {stripe_height}; width: {stripe_width};"></div>'
+        safe_stripe_color = _safe_css_color(stripe_color, "") if stripe_color else ""
+        stripe_bg = f" background: {safe_stripe_color};" if safe_stripe_color else ""
+        stripe_inner = (
+            f'<span class="cover-stripe-text">{_escape_html(str(stripe_text))}</span>'
+            if stripe_text
+            else ""
+        )
+        stripe_html = (
+            f'<div class="cover-stripe" style="height: {stripe_height}; width: {stripe_width};{stripe_bg}">'
+            f"{stripe_inner}</div>"
+        )
 
     logo_html = f'<img class="cover-logo" src="{logo_uri}">' if logo_uri else ""
 
@@ -780,6 +793,9 @@ def _build_cover(
         meta_lines.append(
             f"<strong>{_escape_html(meta_label)}</strong> {_escape_html(meta_author)}"
         )
+    if meta_detail:
+        detail_lines = "<br>".join(_escape_html(line) for line in str(meta_detail).split("\n"))
+        meta_lines.append(f'<span class="cover-meta-detail">{detail_lines}</span>')
     if show_date:
         meta_lines.append(f"<strong>Date</strong> {_escape_html(date_str)}")
     meta_html = (
@@ -1249,6 +1265,14 @@ def _build_html(
             ".cover-align-center { text-align: center; }\n"
             ".cover-align-center .cover-divider { margin-left: auto; margin-right: auto; }\n"
             ".cover-footer-no-line { border-top: none !important; padding-top: 0; }\n"
+            ".cover-subtitle { font-size: 13pt; line-height: 1.35; margin: 0 0 8mm 0; }\n"
+            ".cover-meta-detail { display: inline; }\n"
+            # Text running up the stripe, read from bottom to top.
+            # Anchored at the stripe's horizontal centre, 30mm up; rotated so the
+            # text reads upwards, and shifted by half its line height to centre it.
+            ".cover-stripe-text { position: absolute; left: 50%; bottom: 30mm;"
+            " transform-origin: 0 0; transform: rotate(-90deg) translateY(-50%);"
+            " color: #ffffff; font-size: 11pt; line-height: 1.2; white-space: nowrap; }\n"
             "</style>"
         )
 
@@ -1473,7 +1497,30 @@ def _build_section_bar_style(config: dict[str, Any]) -> str:
 _COL_WIDTHS_COMMENT_RE = re.compile(r"<!--\s*col-widths:\s*([\d.,\s]+?)\s*-->", re.IGNORECASE)
 
 
-def _apply_table_col_widths(html: str, config_weights: list[float] | None = None) -> str:
+def _table_fit(css_path: Path | None, css_text: str | None) -> tuple[float, float, float]:
+    """(text width, table font size, cell left+right padding) in pt, from the theme."""
+    from ._assets import _page_geometry
+
+    geom = _page_geometry(css_text)
+    width_pt = (geom["w"] - geom["left"] - geom["right"]) / 25.4 * 72
+    font_pt, pad_pt = 10.0, 18.0
+    if css_path is not None:
+        try:
+            from ..docx_theme import parse_css_for_word
+
+            word = parse_css_for_word(css_path)
+            font_pt = float(word.get("font_size_table") or word.get("font_size_body") or font_pt)
+            pad_pt = 2 * float(word.get("padding_cell_lr_pt") or pad_pt / 2)
+        except Exception:  # pragma: no cover - a theme that cannot be read keeps defaults
+            pass
+    return width_pt, font_pt, pad_pt
+
+
+def _apply_table_col_widths(
+    html: str,
+    config_weights: list[float] | None = None,
+    fit: tuple[float, float, float] | None = None,
+) -> str:
     """Size table columns like the docx builder: comment > config > untouched.
 
     A ``<!-- col-widths: 30, 70 -->`` comment binds to the next ``<table>``
@@ -1483,6 +1530,10 @@ def _apply_table_col_widths(html: str, config_weights: list[float] | None = None
     fallback as Word. Widths become inline percentage styles on the first-row
     cells under ``table-layout: fixed``. Tables the builder generates with a
     class of their own (``field-box``/``field-row`` form grids) are left alone.
+
+    *fit* is ``(text width, table font size, cell padding)`` in pt: with it, a
+    column narrower than its longest word is widened so no word breaks in the
+    middle (see :func:`table_layout.clamp_to_longest_words`).
     """
     targets: dict[int, list[float]] = {}
     for m in _COL_WIDTHS_COMMENT_RE.finditer(html):
@@ -1518,6 +1569,17 @@ def _apply_table_col_widths(html: str, config_weights: list[float] | None = None
         cells = list(re.finditer(r"<t[hd][^>]*>", row))
         if len(cells) != len(weights):
             continue  # count mismatch — ignored, same as the docx builder
+        if fit:
+            from ..table_layout import clamp_to_longest_words
+
+            table_rows = [
+                [
+                    (tag == "th", body)
+                    for tag, body in re.findall(r"<(t[hd])\b[^>]*>(.*?)</t[hd]>", r, re.S)
+                ]
+                for r in re.findall(r"<tr[^>]*>.*?</tr>", seg, re.DOTALL)
+            ]
+            weights = clamp_to_longest_words(weights, table_rows, *fit)
 
         total = sum(weights)
         parts: list[str] = []
@@ -2036,7 +2098,9 @@ def build(
         isinstance(v, (int, float)) and not isinstance(v, bool) for v in raw_col_widths
     ):
         config_col_weights = [float(v) for v in raw_col_widths]
-    html_body = _apply_table_col_widths(html_body, config_col_weights)
+    html_body = _apply_table_col_widths(
+        html_body, config_col_weights, _table_fit(css_path if css_text else None, css_text)
+    )
 
     # Render Mermaid diagram blocks to inline SVGs, themed from the CSS
     from ..mermaid import diagram_theme, process_html as _process_mermaid
@@ -2177,6 +2241,9 @@ def _measure_layout(html: str, base_url: str) -> Any:
     """Lay *html* out without writing a PDF (used to place margin notes)."""
     from weasyprint.text.fonts import FontConfiguration
 
+    from ..footnotes import patch_weasyprint_footnote_rounding
+
+    patch_weasyprint_footnote_rounding()
     return weasyprint.HTML(string=html, base_url=base_url, url_fetcher=_make_url_fetcher()).render(
         font_config=FontConfiguration()
     )
@@ -2204,6 +2271,9 @@ def _write_pdf(html: str, base_url: str, out_path: Path, options: dict[str, Any]
     """
     from weasyprint.text.fonts import FontConfiguration
 
+    from ..footnotes import patch_weasyprint_footnote_rounding
+
+    patch_weasyprint_footnote_rounding()
     if _IMAGE_CACHE is not None:
         options = {**options, "cache": _IMAGE_CACHE}
     weasyprint.HTML(string=html, base_url=base_url, url_fetcher=_make_url_fetcher()).write_pdf(

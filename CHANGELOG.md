@@ -7,6 +7,48 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`::: flow` groups.** A new `groups` option draws a tinted, rounded, labelled frame behind a
+  set of nodes (`label`, `nodes`, `fill`, `stroke`, `text`), under the arrows so no edge is
+  hidden. Works in PDF, Word and PowerPoint.
+- **Mermaid subgraphs laid out as blocks.** `direction TB|LR|RL|BT` inside a `subgraph` now
+  sets that group's own flow, independently of the parent; `style <groupId> fill:…,stroke:…,color:…`
+  and `class <groupId> <classDef>` colour the group's frame; edges to and from a group id
+  (`GOV --> IND`) meet the frame instead of an inner node; sibling frames never overlap; edges that
+  leave their group are routed at right angles around frames in the way (and off other lines and
+  frame titles); and edge labels move apart instead of overprinting.
+- **Flowcharts keep their direction.** A left-to-right chain, or a set of unlinked nodes, too
+  wide for the column now wraps into rows that still read left to right instead of flipping to
+  top-down. `%%{init: {"flowchart": {"keepDirection": true}}}%%` (or
+  `%%{ mddoc: { keep_direction: true } }%%`) keeps any diagram's declared direction.
+- **Invisible links.** `A ~~~ B` places nodes in the layout without drawing a line.
+- **Sequence `box` groups and coloured `rect` regions.** `box <colour> <Label> ... end` draws a
+  tinted band behind a group of lifelines; `rect rgb(...) ... end` now fills in that colour.
+- **Colour keys for Gantt, mind map and Venn.** `classDef` with `class` and `:::name` (and
+  `style` in mind maps) set section and task colours in Gantt charts and node and set colours in
+  mind maps and Venn diagrams, so they can follow a document-wide colour key.
+- Diagram warnings: an unreadable flowchart, sequence, Gantt or pie line is logged with the line
+  quoted, a diagram that draws nothing warns, and so does one taller than the page's text area.
+- **Tall diagrams split across pages.** A flowchart, state, use case or agent flow diagram taller
+  than the page's text area is cut between ranks (or wrapped rows) into page-sized parts in PDF
+  and Word, instead of being cut off at the bottom margin. Lines over a cut end and restart at
+  matching lettered off-page connectors. `md_doc.mermaid.render_to_svgs` returns the parts.
+- **Component option lint.** `md-doc lint` warns about unknown keys in `::: cards`, `tiers`,
+  `flow`, `rings`, `matrix` and `process` options (and options that are not valid YAML), naming
+  the component, key and line. This catches an unquoted comma in a `{...}` value, which silently
+  created a junk key and truncated the text.
+- PowerPoint output now draws `::: name` component figures (`flow`, `cards`, `tiers`, `rings`,
+  `matrix`, `process`) as pictures; they were previously left as raw text.
+- **Real Word footnotes.** With `page_footnotes: true`, DOCX/DOTX output now gets real Word
+  footnotes at the foot of the page, as the PDF does; the theme's `.md-footnote` rule sets their
+  font and size.
+- Cover keys `cover_meta_detail` (lines between author and date), `cover_stripe_text` (text
+  running up the stripe) and `cover_stripe_color` (also `--mddoc-cover-stripe-color`), in PDF
+  and Word. An empty `cover_meta_label` no longer leaves a stray label in Word.
+- Word reads more of the theme: `p.class` rules become Word paragraph styles for
+  `{: .class }` paragraphs; `p + p { text-indent }` gives book-style first-line indents;
+  `table`/`td { font-family }` sets the table font; an `@top-*` `border-bottom` draws the same
+  rule in the Word header; and the rule above the Word footer follows the `@bottom-*` boxes'
+  `border-top` (none when the theme's footer boxes have no border).
 - **Backslash line breaks.** A backslash at the end of a line is now a hard line break in PDF,
   Word, `.dotx` and slides, as in CommonMark, GitHub and Pandoc (it printed a literal `\`
   before). Code, display maths, table rows, an escaped `\\` and a paragraph-ending backslash are
@@ -88,6 +130,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ICC profiles) that cannot be found.
 
 ### Fixed
+- A diagram taller than a page no longer loses everything past the bottom margin (it pushed to a
+  new page, leaving the one before blank, and was clipped there without a warning).
+- `::: cards`: a title that wraps no longer overprints the subtitle; it pushes the subtitle and
+  items down and the card grows to fit.
+- `::: tiers`: text keeps a minimum size with six or more tiers (tiers grow taller to fit
+  instead), and a tier with no `subtitle` has its title centred vertically.
+- Tables with `<!-- col-widths -->` or `table_col_widths` never break a word in the middle: each
+  column is at least as wide as its longest word, in PDF, DOCX and DOTX.
+- Mermaid flowcharts no longer flip from left-to-right to top-down without a way to stop it
+  (see `keepDirection` above), and long chains wrap into rows instead.
+- A Mermaid `~~~` link no longer swallows the line it is on (the diagram came out missing its
+  nodes, with no warning).
+- A `flowchart LR` with nodes but no links lays them out in a row instead of a column.
+- A sequence `rect rgb(...)` block is filled in its colour instead of a fixed tint.
+- A straight flowchart edge that leaves a node off-centre has its label on the line, not beside it.
+- `\bar`, `\vec`, `\overbrace` and other stretchy accents no longer fail the Word build
+  (mathml2omml writes a malformed `m:groupChrPr`, now repaired).
+- A page footnote that fits is no longer moved to the next page when `@footnote` uses
+  fractional border, padding or margin values (a WeasyPrint rounding error, now tolerated).
+- Word now finds `--mddoc-*` defaults in a shared `_theme.css` that `_docx-theme.css` imports.
 - Contents page numbers (`toc_page_numbers`, list of figures/tables) were hidden by the default
   theme's `a[href^="#"]::after { content: "" }` rule; the contents selectors are now specific
   enough to win.
