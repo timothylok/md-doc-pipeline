@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -934,6 +934,9 @@ pdf = [
     { name = "pdfminer-six" },
     { name = "pdfplumber" },
 ]
+pptx = [
+    { name = "python-pptx" },
+]
 
 [[package]]
 name = "markupsafe"
@@ -1081,7 +1084,7 @@ dependencies = [
     { name = "jinja2" },
     { name = "latex2mathml" },
     { name = "markdown" },
-    { name = "markitdown", extra = ["docx", "pdf"] },
+    { name = "markitdown", extra = ["docx", "pdf", "pptx"] },
     { name = "mathml2omml" },
     { name = "pymdown-extensions" },
     { name = "python-docx" },
@@ -1100,16 +1103,18 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1.5" },
     { name = "latex2mathml", specifier = ">=3.78" },
     { name = "markdown", specifier = ">=3.5" },
-    { name = "markitdown", extras = ["pdf", "docx"], specifier = ">=0.1.0" },
+    { name = "markitdown", extras = ["pdf", "docx", "pptx"], specifier = ">=0.1.0" },
+    { name = "markitdown", extras = ["xlsx"], marker = "extra == 'xlsx'", specifier = ">=0.1.0" },
     { name = "mathml2omml", specifier = ">=0.0.2" },
     { name = "pymdown-extensions", specifier = ">=10.0" },
     { name = "python-docx", specifier = ">=1.1.2" },
     { name = "python-pptx", specifier = ">=1.0" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "vl-convert-python", marker = "extra == 'charts'", specifier = ">=1.9,<2" },
     { name = "weasyprint", specifier = ">=68.0,<71" },
     { name = "ziamath", specifier = ">=0.13" },
 ]
-provides-extras = ["azure", "s3", "mermaid"]
+provides-extras = ["azure", "s3", "mermaid", "xlsx", "charts"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1355,14 +1360,14 @@ wheels = [
 
 [[package]]
 name = "opentelemetry-api"
-version = "1.45.1"
+version = "1.45.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2e/02/6e0ae9cc61bd3169d401077b507b3ebc344745171e1051ab430be012dcd9/opentelemetry_api-1.45.1.tar.gz", hash = "sha256:aa38ed19bcc084ba42782a73255b3582283eced7ad6dddbd6695189e69adfb75", size = 72804, upload-time = "2026-10-06T17:32:58.133Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/19/14/cf3a6b6448849656e1e5f4e2101f3988dc6789724050096aba1bc5ccf592/opentelemetry_api-1.45.2.tar.gz", hash = "sha256:d7b0008e21e5fd61cbe7a7f34ca3b6905a78ab677d9bc395e299359c75cda6b4", size = 73277, upload-time = "2026-10-29T17:29:37.888Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1e/41/f7dcf80b81ee8e71c1a2b59f14208bc723edbd89ed027a73b175abf6348e/opentelemetry_api-1.45.1-py3-none-any.whl", hash = "sha256:b31553efa588ae44bc306f863c785c5333a9ecc091248c6ee68b4b6c87fdedfb", size = 60256, upload-time = "2026-10-06T17:32:33.506Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/2d/610db864d7513158cebb8f36cc88e67e73bd6c7aa1905ef18d89e1281c81/opentelemetry_api-1.45.2-py3-none-any.whl", hash = "sha256:2cbd737377e710ee740d261c94e93fa0f08e6d037c18f17513cc0a2d94479a34", size = 60335, upload-time = "2026-10-29T17:29:06.955Z" },
 ]
 
 [[package]]
